@@ -1,0 +1,11 @@
+node_modules/
+web/dist/
+server/dist/
+.env
+.env.*
+!.env.example
+.local/
+npm-debug.log*
+*.log
+*.tsbuildinfo
+.DS_Store

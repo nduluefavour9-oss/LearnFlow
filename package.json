@@ -7,7 +7,7 @@
     "server"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "dev": "concurrently -k -n api,web -c green,cyan \"npm run dev -w @learnflow/server\" \"npm run dev -w @learnflow/web\"",
@@ -15,5 +15,8 @@
     "start": "npm run start -w @learnflow/server",
     "db:seed": "npm run db:seed -w @learnflow/server",
     "check": "npm run check --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
   }
 }

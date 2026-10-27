@@ -246,6 +246,88 @@ const courses = [
   },
 ];
 
+const legacyUniversityCourses = [
+  {
+    slug: "legacy-computer-performance-evaluation",
+    title: "Computer Performance Evaluation",
+    level: "advanced",
+  },
+  {
+    slug: "legacy-artificial-intelligence",
+    title: "Artificial Intelligence",
+    level: "intermediate",
+  },
+  {
+    slug: "legacy-remote-sensing-gis",
+    title: "Remote Sensing and GIS",
+    level: "intermediate",
+  },
+  {
+    slug: "legacy-information-systems-management",
+    title: "Information Systems Management",
+    level: "beginner",
+  },
+  {
+    slug: "legacy-data-communication-networks",
+    title: "Data Communication and Networks",
+    level: "intermediate",
+  },
+  {
+    slug: "legacy-net-centric-computing",
+    title: "Net-Centric Computing",
+    level: "advanced",
+  },
+  {
+    slug: "legacy-project-management",
+    title: "Project Management",
+    level: "beginner",
+  },
+  {
+    slug: "legacy-organization-programming-languages",
+    title: "Organization of Programming Languages",
+    level: "advanced",
+  },
+  {
+    slug: "legacy-software-engineering",
+    title: "Software Engineering",
+    level: "intermediate",
+  },
+  {
+    slug: "legacy-computer-graphics-visualization",
+    title: "Computer Graphics and Visualization",
+    level: "intermediate",
+  },
+  {
+    slug: "legacy-computer-modelling-simulation",
+    title: "Computer Modelling and Simulation",
+    level: "intermediate",
+  },
+  {
+    slug: "legacy-algorithm-complexity",
+    title: "Algorithm and Complexity",
+    level: "advanced",
+  },
+  {
+    slug: "legacy-research-methodology-technical-writing",
+    title: "Research Methodology and Technical Writing",
+    level: "beginner",
+  },
+  {
+    slug: "legacy-distributed-computing",
+    title: "Distributed Computing",
+    level: "advanced",
+  },
+].map((course) => ({
+  ...course,
+  summary: "A Computer Science course offered by Legacy University Okija. The university administrator manages its lessons and course materials.",
+  subject: "Computer Science",
+  provider: "Legacy University Okija",
+  sourceUrl: "https://www.legacyuniversity.edu.ng/",
+  licenseName: "University course materials; permissions vary",
+  licenseUrl: "https://www.legacyuniversity.edu.ng/",
+  attribution: "Legacy University Okija, Department of Computer Science. Confirm permission and attribution for each course material before reusing it.",
+}));
+
 const courseDetailsBySlug: Record<string, CourseDetails> = {
   "harvard-cs50x-2026": {
     description: "Harvard’s introduction to the intellectual enterprises of computer science and the art of programming, for students with or without prior programming experience. Topics include computational thinking, abstraction, algorithms, data structures, C, Python, SQL, and web development, culminating in a final project.",
@@ -803,7 +885,9 @@ async function seed() {
           (slug, title, summary, subject, level, provider, source_url, license_name, license_url,
            attribution, details, is_published)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, TRUE)
-         ON CONFLICT (slug) DO UPDATE SET details = EXCLUDED.details`,
+         ON CONFLICT (slug) DO UPDATE SET
+           details = EXCLUDED.details,
+           is_published = EXCLUDED.is_published`,
         [
           course.slug,
           course.title,
@@ -818,6 +902,97 @@ async function seed() {
           JSON.stringify(courseDetailsBySlug[course.slug] ?? {}),
         ],
       );
+    }
+
+    for (const course of legacyUniversityCourses) {
+      await client.query(
+        `INSERT INTO courses
+          (slug, title, summary, subject, level, provider, source_url, license_name, license_url,
+           attribution, details, is_published)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '{}'::jsonb, TRUE)
+         ON CONFLICT (slug) DO UPDATE SET
+           details = EXCLUDED.details,
+           is_published = EXCLUDED.is_published,
+           title = EXCLUDED.title,
+           summary = EXCLUDED.summary,
+           subject = EXCLUDED.subject,
+           level = EXCLUDED.level,
+           provider = EXCLUDED.provider,
+           source_url = EXCLUDED.source_url,
+           license_name = EXCLUDED.license_name,
+           license_url = EXCLUDED.license_url,
+           attribution = EXCLUDED.attribution`,
+        [
+          course.slug,
+          course.title,
+          course.summary,
+          course.subject,
+          course.level,
+          course.provider,
+          course.sourceUrl,
+          course.licenseName,
+          course.licenseUrl,
+          course.attribution,
+        ],
+      );
+    }
+
+    const legacyCourseIds = await client.query<{ id: string; slug: string }>(
+      "SELECT id, slug FROM courses WHERE slug = ANY($1::text[])",
+      [legacyUniversityCourses.map((course) => course.slug)],
+    );
+    for (const row of legacyCourseIds.rows) {
+      const course = legacyUniversityCourses.find((item) => item.slug === row.slug);
+      if (!course) continue;
+      const legacyLessons = [
+        ["Course foundations", "Start by defining the purpose, scope, and key terminology of the course. Use examples to connect each new term to a practical problem in the field."],
+        ["Core concepts and models", "Break the subject into its central concepts, inputs, processes, outputs, and constraints. Compare how those ideas appear in simple and realistic scenarios."],
+        ["Problem solving practice", "Solve a representative problem in small steps: identify the known information, choose a method, execute it carefully, and verify the result."],
+        ["Application and analysis", "Apply the course concepts to a new situation. Explain your assumptions, evaluate alternatives, and support your conclusion with evidence."],
+        ["Review and integrated project", "Review the course themes and produce a short written summary or practical project that connects the foundational ideas to the techniques studied."],
+      ] as const;
+
+      for (const [index, [title, body]] of legacyLessons.entries()) {
+        await client.query(
+          `INSERT INTO lessons
+            (course_id, title, body, position, quiz_question, quiz_options, quiz_answer_index)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+           ON CONFLICT (course_id, position) DO NOTHING`,
+          [
+            row.id,
+            `${course.title}: ${title}`,
+            `${body}\n\nStudy task: Read the relevant chapter or lecture notes supplied by Legacy University Okija, summarize one key idea in your own words, and test your understanding before continuing.`,
+            index + 1,
+            `Which study step best demonstrates understanding in ${course.title}?`,
+            JSON.stringify(["Explain the idea and apply it to a new example.", "Copy a definition without checking it.", "Skip examples and assume the topic is understood."]),
+            0,
+          ],
+        );
+      }
+
+      const resources = [
+        ["assignment", "Course study assignment", "Complete a short written assignment: define three key course concepts, solve one representative problem, and explain each step.", 1],
+        ["lecture_notes", "Course notes checklist", "Use the checklist as a guide when reviewing lecturer-provided notes, readings, or lesson recordings.", 2],
+        ["other", "Legacy University course source", "Open the university website to locate the current syllabus and lecturer-provided materials for this course.", 3],
+      ] as const;
+      for (const [resourceType, title, description, position] of resources) {
+        await client.query(
+          `INSERT INTO course_resources
+            (course_id, resource_type, title, description, license_name, attribution, url, position)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           ON CONFLICT (course_id, position) DO NOTHING`,
+          [
+            row.id,
+            resourceType,
+            title,
+            description,
+            "University course materials; permissions vary",
+            "Legacy University Okija, Department of Computer Science. Confirm permission and attribution before reuse.",
+            course.sourceUrl,
+            position,
+          ],
+        );
+      }
     }
 
     const courseIds = await client.query<{ id: string; slug: string }>(

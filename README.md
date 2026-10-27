@@ -38,7 +38,7 @@ npm run dev
 
 Open the Vite URL printed in the terminal (normally `http://127.0.0.1:5173`). Vite proxies `/api` requests to the Express API at port 4000. Apply the Supabase schema migration before seeding or starting the app.
 
-The seed adds 20 official course links and 20 original, topic-specific study guides for every course. Each guide has a concise explanation and a comprehension question; course detail pages link students to the provider for the complete syllabus, lectures, readings, assignments, and downloadable materials. Guides are independently written study aids, not copies or substitutes for the providers' course materials. Each course detail page also includes a source-based description, course format, and available material types, plus instructor, department, topic, textbook, image, or download information where verified on the provider's page. The seed is safe to rerun, preserves lesson IDs and progress, leaves lessons with non-seed titles untouched, and does not duplicate courses or lessons:
+The seed adds the 14 Computer Science course listings supplied for Legacy University Okija and also publishes five starter lessons with quizzes for each course. It adds study-resource placeholders for lecture notes, course assignments, and the university source. Their levels and content can be changed by an administrator. The seed retains the earlier Harvard, Stanford, and MIT sample course records and study guides and publishes those records in the learner catalog. It does not delete course records or progress. The seed is safe to rerun, preserves lesson IDs and progress, leaves lessons with non-seed titles untouched, and does not duplicate courses or lessons:
 
 ```powershell
 npm run db:seed

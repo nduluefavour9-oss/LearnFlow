@@ -13,6 +13,7 @@ const supabase = supabaseUrl && supabaseAnonKey
 
 type Role = "learner" | "admin";
 type Level = "beginner" | "intermediate" | "advanced" | "all";
+type CatalogLevel = Exclude<Level, "all">;
 type AuthMode = "login" | "register" | "forgot" | "reset";
 type ResourceType = "video" | "lecture_notes" | "exam" | "assignment" | "problem_set" | "other";
 
@@ -197,7 +198,7 @@ function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [search, setSearch] = useState("");
-  const [levelFilter, setLevelFilter] = useState<Level | "all">("all");
+  const [levelFilter, setLevelFilter] = useState<CatalogLevel>("beginner");
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [quizFeedback, setQuizFeedback] = useState<Record<string, QuizFeedback>>({});
   const [courseForm, setCourseForm] = useState<CourseInput>(emptyCourse);
@@ -213,7 +214,7 @@ function App() {
 
   const request = useCallback(async <T,>(url: string, init: RequestInit = {}): Promise<T> => {
     const headers = new Headers(init.headers);
-    if (init.body) headers.set("Content-Type", "application/json");
+    if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
     if (supabase) {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
@@ -318,11 +319,6 @@ function App() {
   }, [page, user, refreshAdminData]);
 
   const completedLessonIds = useMemo(() => new Set(progress.map((entry) => entry.lesson_id)), [progress]);
-  const filteredCourses = useMemo(() => courses.filter((course) => {
-    const matchesSearch = `${course.title} ${course.subject} ${course.provider}`.toLowerCase().includes(search.toLowerCase());
-    const matchesLevel = levelFilter === "all" || course.level === levelFilter || course.level === "all";
-    return matchesSearch && matchesLevel;
-  }), [courses, levelFilter, search]);
   const completedCourses = useMemo(() => new Set(
     courses.filter((course) => {
       const lessonCount = course.lessonCount ?? course.lessons.length;
@@ -607,17 +603,16 @@ function App() {
         if (resourceFile.size > 100 * 1024 * 1024) {
           throw new Error("Files must be 100 MB or smaller.");
         }
-        const safeName = resourceFile.name.replace(/[^\w.-]+/g, "-").slice(-100);
-        uploadedPath = `${resourceCourseId}/${crypto.randomUUID()}-${safeName}`;
-        const { error: uploadError } = await supabase.storage
-          .from("course-materials")
-          .upload(uploadedPath, resourceFile, {
-            contentType: resourceFile.type || "application/octet-stream",
-            upsert: false,
-          });
-        if (uploadError) throw uploadError;
+        const uploadForm = new FormData();
+        uploadForm.set("courseId", resourceCourseId);
+        uploadForm.set("file", resourceFile);
+        const uploadResult = await request<{ storagePath: string; contentType: string | null }>(
+          "/api/admin/resources/upload",
+          { method: "POST", body: uploadForm },
+        );
+        uploadedPath = uploadResult.storagePath;
         storagePath = uploadedPath;
-        contentType = resourceFile.type || null;
+        contentType = uploadResult.contentType;
         resourceUrl = null;
       } else if (resourceUrl) {
         storagePath = null;
@@ -640,29 +635,20 @@ function App() {
         },
       );
       resourceSaved = true;
-      const oldResource = editingResourceId
-        ? course.resources.find((resource) => resource.id === editingResourceId)
-        : undefined;
       setNotice(editingResourceId ? "Course material updated." : "Course material added.");
       setResourceCourseId(null);
       setEditingResourceId(null);
       setResourceForm({ ...emptyResource });
       setResourceFile(null);
       await Promise.all([refreshCourses(), refreshAdminData()]);
-      if (oldResource?.storagePath && oldResource.storagePath !== storagePath) {
-        const { error: removeError } = await supabase.storage
-          .from("course-materials")
-          .remove([oldResource.storagePath]);
-        if (removeError) {
-          setError(`Material was updated, but the previous file could not be removed: ${removeError.message}`);
-        }
-      }
     } catch (reason) {
       if (uploadedPath && !resourceSaved) {
-        const { error: cleanupError } = await supabase.storage.from("course-materials").remove([uploadedPath]);
-        if (cleanupError) {
+        await request("/api/admin/resources/delete-upload", {
+          method: "POST",
+          body: JSON.stringify({ storagePath: uploadedPath }),
+        }).catch((cleanupError) => {
           console.error("Could not remove an unlinked course upload.", cleanupError);
-        }
+        });
       }
       const detail = reason instanceof Error ? reason.message : "Could not save this course material.";
       setError(resourceSaved
@@ -841,7 +827,7 @@ function App() {
         ) : (
           <HomePage
             user={user}
-            courses={filteredCourses}
+            courses={courses}
             search={search}
             setSearch={setSearch}
             levelFilter={levelFilter}
@@ -894,8 +880,8 @@ interface HomePageProps {
   courses: Course[];
   search: string;
   setSearch: (value: string) => void;
-  levelFilter: Level | "all";
-  setLevelFilter: (value: Level | "all") => void;
+  levelFilter: CatalogLevel;
+  setLevelFilter: (value: CatalogLevel) => void;
   progress: ProgressEntry[];
   completedCourses: Set<string>;
   onOpenCourse: (slug: string) => void;
@@ -904,19 +890,28 @@ interface HomePageProps {
 
 function HomePage(props: HomePageProps) {
   const { user, courses, search, setSearch, levelFilter, setLevelFilter, progress, completedCourses, onOpenCourse, onOpenAuth } = props;
+  const filteredCourses = courses.filter((course) => {
+    const matchesSearch = `${course.title} ${course.subject} ${course.provider}`.toLowerCase().includes(search.toLowerCase());
+    return matchesSearch && (course.level === levelFilter || course.level === "all");
+  });
+  const levelCounts = {
+    beginner: courses.filter((course) => course.level === "beginner" || course.level === "all").length,
+    intermediate: courses.filter((course) => course.level === "intermediate" || course.level === "all").length,
+    advanced: courses.filter((course) => course.level === "advanced" || course.level === "all").length,
+  };
   return (
     <>
       <section className="hero-section">
         <div className="hero-grid">
           <div className="hero-copy">
-            <span className="eyebrow"><span className="eyebrow-dot" />A better way to learn, together</span>
+            <span className="eyebrow"><span className="eyebrow-dot" />Legacy University Okija · Student learning portal</span>
             <h1>Make room for<br /><span>what you can become.</span></h1>
-            <p>University-level computer science courses, thoughtful study tools, and a clear path from curiosity to confidence.</p>
+            <p>Explore your university courses, practise with lesson quizzes, and keep track of your learning progress.</p>
             <div className="hero-actions">
               <a className="button button-primary" href="#courses">Explore courses <span aria-hidden="true">→</span></a>
               {!user && <button className="button button-secondary" onClick={onOpenAuth}>Join LearnFlow</button>}
             </div>
-            <div className="hero-proof"><span className="proof-check">✓</span><span>Open course sources, clear licensing, and progress that stays yours.</span></div>
+            <div className="hero-proof"><span className="proof-check">✓</span><span>Learn at your pace and return to your saved progress.</span></div>
           </div>
           <div className="hero-art" aria-label="A preview of the LearnFlow course journey">
             <div className="art-orbit orbit-one" /><div className="art-orbit orbit-two" />
@@ -931,7 +926,7 @@ function HomePage(props: HomePageProps) {
             <div className="floating-note note-bottom"><span className="note-icon note-purple">✓</span><div><strong>Open knowledge</strong><small>Built on trusted sources</small></div></div>
           </div>
         </div>
-        <div className="hero-bottom"><span>Explore learning from</span><strong>HARVARD</strong><strong>STANFORD</strong><strong>OPEN EDUCATION</strong><span>and more to come</span></div>
+        <div className="hero-bottom"><span>Courses for students at</span><strong>LEGACY UNIVERSITY OKIJA</strong><span>Computer Science and more departments to come</span></div>
       </section>
 
       {user && <section className="progress-overview content-width" id="my-progress">
@@ -941,19 +936,40 @@ function HomePage(props: HomePageProps) {
 
       <section className="catalog-section content-width" id="courses">
         <div className="section-heading">
-          <div><span className="eyebrow">START SOMEWHERE GOOD</span><h2>Courses worth your time.</h2><p>Explore official course materials, with LearnFlow study lessons where available.</p></div>
+          <div><span className="eyebrow">LEGACY UNIVERSITY OKIJA</span><h2>Choose your learning level.</h2><p>Pick a level to see the Computer Science courses available for you.</p></div>
           <span className="catalog-count">{courses.length} courses</span>
         </div>
         <div className="catalog-controls">
           <label className="search-box"><span aria-hidden="true">⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search courses or subjects" aria-label="Search courses or subjects" /></label>
-          <label className="filter-select"><span>Experience</span><select value={levelFilter} onChange={(event) => setLevelFilter(event.target.value as Level | "all")}><option value="all">All levels</option><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label>
         </div>
-        <div className="course-grid">
-          {courses.map((course, index) => (
+        <div className="level-tabs" role="tablist" aria-label="Filter courses by learning level">
+          {(["beginner", "intermediate", "advanced"] as const).map((level) => (
+            <button
+              className={`level-tab${levelFilter === level ? " selected" : ""}`}
+              id={`level-tab-${level}`}
+              key={level}
+              type="button"
+              role="tab"
+              aria-selected={levelFilter === level}
+              aria-controls="level-course-list"
+              onClick={() => setLevelFilter(level)}
+            >
+              <span>{level[0].toUpperCase() + level.slice(1)}</span>
+              <small>{levelCounts[level]} courses</small>
+            </button>
+          ))}
+        </div>
+        <div
+          className="course-grid"
+          id="level-course-list"
+          role="tabpanel"
+          aria-labelledby={`level-tab-${levelFilter}`}
+        >
+          {filteredCourses.map((course, index) => (
             <article className="course-card" key={course.id}>
               <div className={`course-cover cover-${index % 3}`}><span className="cover-kicker">{course.subject}</span><span className="cover-symbol">{String(index + 1).padStart(2, "0")}</span><span className="cover-mark">{index === 1 ? "λ" : index === 2 ? "∑" : "{ }"}</span></div>
               <div className="course-card-content">
-                <div className="course-card-meta"><span className="level-pill">{course.level === "all" ? "All levels" : course.level}</span><span>{(course.lessonCount ?? course.lessons.length) > 0 ? `${course.lessonCount ?? course.lessons.length} LearnFlow lesson${(course.lessonCount ?? course.lessons.length) === 1 ? "" : "s"}` : "5-part roadmap"}</span></div>
+                <div className="course-card-meta"><span className="level-pill">{course.level === "all" ? "All levels" : course.level}</span><span>{(course.lessonCount ?? course.lessons.length) > 0 ? `${course.lessonCount ?? course.lessons.length} lesson${(course.lessonCount ?? course.lessons.length) === 1 ? "" : "s"}` : "Lessons coming soon"}</span></div>
                 <h3>{course.title}</h3><p className="course-summary">{course.summary}</p>
                 <div className="course-provider"><span className="provider-seal">{course.provider.slice(0, 1)}</span><span>{course.provider}</span></div>
                 <div className="course-card-bottom"><span className="license-chip">{course.licenseName}</span>{completedCourses.has(course.id) && <span className="completed-tag">Completed</span>}</div>
@@ -968,7 +984,7 @@ function HomePage(props: HomePageProps) {
             </article>
           ))}
         </div>
-        {!courses.length && <div className="empty-state"><span>⌕</span><h3>No courses match that search.</h3><p>Try another title or choose a different level.</p><button className="button button-secondary" onClick={() => { setSearch(""); setLevelFilter("all"); }}>Clear filters</button></div>}
+        {!filteredCourses.length && <div className="empty-state"><span>⌕</span><h3>{courses.length ? "No courses at this level match your search." : "Courses are being added."}</h3><p>{courses.length ? "Try another course name or select a different level." : "Your university administrator will add courses and learning materials here."}</p>{search && <button className="button button-secondary" onClick={() => setSearch("")}>Clear search</button>}</div>}
       </section>
 
       <section className="trust-band">
@@ -1109,7 +1125,7 @@ function CourseDetail(props: CourseDetailProps) {
                 <span className={complete ? "lesson-status is-complete" : "lesson-status"}>{complete ? "✓" : "○"}</span>
               </article>
             );
-          }) : <div className="empty-state"><h3>No LearnFlow lessons yet.</h3><p>This catalog entry links to the provider's official course materials. We link out rather than copy materials whose licenses may restrict reuse.</p><a className="button button-secondary" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Open official course ↗</a></div>}
+          }) : <div className="empty-state"><h3>No lessons have been added yet.</h3><p>{course.provider === "Legacy University Okija" ? "The university administrator can add lessons, quizzes, and assignment links for this course." : "This catalog entry links to the provider's official course materials. We link out rather than copy materials whose licenses may restrict reuse."}</p><a className="button button-secondary" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">{course.provider === "Legacy University Okija" ? "Visit Legacy University ↗" : "Open official course ↗"}</a></div>}
         </div>
         <aside className="course-source-card"><span className="eyebrow">COURSE SOURCE</span><h3>Continue with the provider</h3><p>Open the official course for its full syllabus, activities, and course-specific resources.</p><a className="button button-primary button-wide" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Visit official course ↗</a><div className="source-detail"><span>PROVIDER</span><strong>{course.provider}</strong></div><div className="source-detail"><span>LICENSE</span><strong>{course.licenseName}</strong><a href={course.licenseUrl} target="_blank" rel="noopener noreferrer">Review reuse terms ↗</a></div><div className="source-attribution"><span>ATTRIBUTION</span><p>{course.attribution}</p></div></aside>
       </div>

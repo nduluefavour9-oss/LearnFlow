@@ -1,11 +1,18 @@
 import { Router, type NextFunction, type Request, type RequestHandler, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import multer from "multer";
 import { pool } from "./db";
 import { supabaseAdmin } from "./supabase";
 import { courseResourceSchema, courseSchema, lessonSchema, userUpdateSchema } from "./validation";
 import type { AuthenticatedUser, CourseDetails, CourseRecord, CourseResourceRecord, LessonRecord } from "./types";
 
 export const router = Router();
+
+const resourceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 100 * 1024 * 1024 },
+});
 
 function asyncRoute(
   handler: (req: Request, res: Response, next: NextFunction) => Promise<void>,
@@ -349,6 +356,29 @@ router.get("/admin/courses", requireAdmin, asyncRoute(async (_req, res) => {
   });
 }));
 
+router.post("/admin/resources/upload", requireAdmin, resourceUpload.single("file"), asyncRoute(async (req, res) => {
+  const courseId = z.string().uuid().parse(req.body.courseId);
+  const file = req.file;
+  if (!file) {
+    res.status(400).json({ error: "Choose a file to upload." });
+    return;
+  }
+  const course = await pool.query("SELECT id FROM courses WHERE id = $1", [courseId]);
+  if (!course.rowCount) {
+    res.status(404).json({ error: "Course not found." });
+    return;
+  }
+  const safeName = file.originalname.replace(/[^\w.-]+/g, "-").slice(-100);
+  const storagePath = `${courseId}/${randomUUID()}-${safeName}`;
+  const { error } = await supabaseAdmin.storage.from("course-materials").upload(
+    storagePath,
+    file.buffer,
+    { contentType: file.mimetype || "application/octet-stream", upsert: false },
+  );
+  if (error) throw error;
+  res.status(201).json({ storagePath, contentType: file.mimetype || null });
+}));
+
 router.post("/admin/courses/:courseId/resources", requireAdmin, asyncRoute(async (req, res) => {
   const input = courseResourceSchema.parse(req.body);
   const courseId = z.string().uuid().parse(req.params.courseId);
@@ -374,11 +404,18 @@ router.post("/admin/courses/:courseId/resources", requireAdmin, asyncRoute(async
   res.status(201).json({ id: result.rows[0].id });
 }));
 
+router.post("/admin/resources/delete-upload", requireAdmin, asyncRoute(async (req, res) => {
+  const { storagePath } = z.object({ storagePath: z.string().trim().min(1).max(500) }).parse(req.body);
+  const { error } = await supabaseAdmin.storage.from("course-materials").remove([storagePath]);
+  if (error) throw error;
+  res.status(204).end();
+}));
+
 router.put("/admin/resources/:resourceId", requireAdmin, asyncRoute(async (req, res) => {
   const input = courseResourceSchema.parse(req.body);
   const resourceId = z.string().uuid().parse(req.params.resourceId);
   const current = await pool.query(
-    "SELECT course_id FROM course_resources WHERE id = $1",
+    "SELECT course_id, storage_path FROM course_resources WHERE id = $1",
     [resourceId],
   );
   if (!current.rowCount) {
@@ -400,6 +437,11 @@ router.put("/admin/resources/:resourceId", requireAdmin, asyncRoute(async (req, 
       input.attribution, input.url, input.storagePath, input.contentType, input.position,
     ],
   );
+  const oldStoragePath = current.rows[0].storage_path as string | null;
+  if (oldStoragePath && oldStoragePath !== input.storagePath) {
+    const { error } = await supabaseAdmin.storage.from("course-materials").remove([oldStoragePath]);
+    if (error) throw error;
+  }
   res.json({ id: resourceId });
 }));
 

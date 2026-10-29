@@ -4,7 +4,7 @@ import { z } from "zod";
 import multer from "multer";
 import { pool } from "./db";
 import { supabaseAdmin } from "./supabase";
-import { courseResourceSchema, courseSchema, lessonSchema, userUpdateSchema } from "./validation";
+import { courseResourceSchema, courseSchema, courseSubmissionSchema, lessonSchema, reviewSubmissionSchema, userUpdateSchema } from "./validation";
 import type { AuthenticatedUser, CourseDetails, CourseRecord, CourseResourceRecord, LessonRecord } from "./types";
 
 export const router = Router();
@@ -138,6 +138,130 @@ function mapCourse(
 router.get("/auth/me", requireAuth, (_req, res) => {
   res.json({ user: res.locals.user });
 });
+
+router.post("/submissions", requireAuth, asyncRoute(async (req, res) => {
+  const input = courseSubmissionSchema.parse(req.body);
+  const positions = input.lessons.map((lesson) => lesson.position);
+  if (new Set(positions).size !== positions.length) {
+    res.status(400).json({ error: "Lesson positions must be unique within a course." });
+    return;
+  }
+  const resourcePositions = input.resources.map((resource) => resource.position);
+  if (new Set(resourcePositions).size !== resourcePositions.length) {
+    res.status(400).json({ error: "Course material positions must be unique within a submission." });
+    return;
+  }
+  const slug = await pool.query("SELECT 1 FROM courses WHERE slug = $1 LIMIT 1", [input.course.slug]);
+  if (slug.rowCount) {
+    res.status(409).json({ error: "A course with this slug already exists." });
+    return;
+  }
+  const user = res.locals.user as AuthenticatedUser;
+  const result = await pool.query(
+    `INSERT INTO course_submissions (submitted_by, title, payload)
+     VALUES ($1, $2, $3::jsonb) RETURNING id, status, created_at`,
+    [user.id, input.course.title, JSON.stringify(input)],
+  );
+  res.status(201).json({ submission: result.rows[0] });
+}));
+
+router.get("/submissions/mine", requireAuth, asyncRoute(async (_req, res) => {
+  const user = res.locals.user as AuthenticatedUser;
+  const result = await pool.query(
+    `SELECT id, title, status, review_note, created_at, reviewed_at
+     FROM course_submissions WHERE submitted_by = $1 ORDER BY created_at DESC`,
+    [user.id],
+  );
+  res.json({ submissions: result.rows });
+}));
+
+router.get("/admin/submissions", requireAdmin, asyncRoute(async (_req, res) => {
+  const result = await pool.query(
+    `SELECT s.id, s.title, s.payload, s.status, s.review_note, s.created_at, s.reviewed_at,
+            p.full_name AS submitter_name, p.email AS submitter_email
+     FROM course_submissions s
+     JOIN profiles p ON p.id = s.submitted_by
+     ORDER BY CASE s.status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, s.created_at DESC`,
+  );
+  res.json({ submissions: result.rows });
+}));
+
+router.post("/admin/submissions/:submissionId/approve", requireAdmin, asyncRoute(async (req, res) => {
+  const submissionId = z.string().uuid().parse(req.params.submissionId);
+  const review = reviewSubmissionSchema.parse(req.body);
+  const admin = res.locals.user as AuthenticatedUser;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const found = await client.query(
+      "SELECT id, payload FROM course_submissions WHERE id = $1 AND status = 'pending' FOR UPDATE",
+      [submissionId],
+    );
+    if (!found.rowCount) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ error: "Pending course submission not found." });
+      return;
+    }
+    const input = courseSubmissionSchema.parse(found.rows[0].payload);
+    const inserted = await client.query(
+      `INSERT INTO courses
+        (slug, title, summary, subject, level, provider, source_url, license_name, license_url, attribution, is_published)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
+       RETURNING id`,
+      [
+        input.course.slug, input.course.title, input.course.summary, input.course.subject,
+        input.course.level, input.course.provider, input.course.sourceUrl, input.course.licenseName,
+        input.course.licenseUrl, input.course.attribution,
+      ],
+    );
+    const courseId = inserted.rows[0].id as string;
+    for (const lesson of input.lessons) {
+      await client.query(
+        `INSERT INTO lessons (course_id, title, body, position, quiz_question, quiz_options, quiz_answer_index)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`,
+        [courseId, lesson.title, lesson.body, lesson.position, lesson.quizQuestion,
+          JSON.stringify(lesson.quizOptions), lesson.quizAnswerIndex],
+      );
+    }
+    for (const resource of input.resources) {
+      await client.query(
+        `INSERT INTO course_resources
+          (course_id, resource_type, title, description, license_name, attribution, url, storage_path, content_type, position)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, $8)`,
+        [courseId, resource.type, resource.title, resource.description, resource.licenseName,
+          resource.attribution, resource.url, resource.position],
+      );
+    }
+    await client.query(
+      `UPDATE course_submissions SET status = 'approved', review_note = $2, reviewed_by = $3, reviewed_at = NOW()
+       WHERE id = $1`,
+      [submissionId, review.note, admin.id],
+    );
+    await client.query("COMMIT");
+    res.json({ id: courseId });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}));
+
+router.post("/admin/submissions/:submissionId/reject", requireAdmin, asyncRoute(async (req, res) => {
+  const submissionId = z.string().uuid().parse(req.params.submissionId);
+  const review = reviewSubmissionSchema.parse(req.body);
+  const admin = res.locals.user as AuthenticatedUser;
+  const result = await pool.query(
+    `UPDATE course_submissions SET status = 'rejected', review_note = $2, reviewed_by = $3, reviewed_at = NOW()
+     WHERE id = $1 AND status = 'pending' RETURNING id`,
+    [submissionId, review.note, admin.id],
+  );
+  if (!result.rowCount) {
+    res.status(404).json({ error: "Pending course submission not found." });
+    return;
+  }
+  res.json({ id: submissionId });
+}));
 
 router.get("/courses", asyncRoute(async (req, res) => {
   const search = typeof req.query.search === "string" ? req.query.search.trim().slice(0, 100) : "";
@@ -559,6 +683,14 @@ router.delete("/admin/courses/:courseId", requireAdmin, asyncRoute(async (req, r
 router.post("/admin/courses/:courseId/lessons", requireAdmin, asyncRoute(async (req, res) => {
   const input = lessonSchema.parse(req.body);
   const courseId = z.string().uuid().parse(req.params.courseId);
+  const duplicatePosition = await pool.query(
+    "SELECT 1 FROM lessons WHERE course_id = $1 AND position = $2 LIMIT 1",
+    [courseId, input.position],
+  );
+  if (duplicatePosition.rowCount) {
+    res.status(409).json({ error: `Lesson position ${input.position} is already used in this course. Choose a different position.` });
+    return;
+  }
   const result = await pool.query(
     `INSERT INTO lessons
       (course_id, title, body, position, quiz_question, quiz_options, quiz_answer_index)

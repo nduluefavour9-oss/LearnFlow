@@ -128,6 +128,50 @@ interface CourseResourceInput {
   position: number;
 }
 
+interface CourseSubmission {
+  id: string;
+  title: string;
+  status: "pending" | "approved" | "rejected";
+  review_note: string;
+  created_at: string;
+  reviewed_at: string | null;
+  submitter_name?: string;
+  submitter_email?: string;
+  payload?: {
+    course: Record<string, unknown>;
+    lessons: LessonInput[];
+    resources: Array<CourseResourceInput & { storagePath: null; contentType: null }>;
+  };
+}
+
+interface CourseSubmissionInput {
+  title: string;
+  summary: string;
+  subject: string;
+  level: Level;
+  slug: string;
+  provider: string;
+  sourceUrl: string;
+  licenseName: string;
+  licenseUrl: string;
+  attribution: string;
+  lessonTitle: string;
+  lessonBody: string;
+  quizQuestion: string;
+  quizOptions: string;
+  quizAnswerIndex: number;
+  resourceTitle: string;
+  resourceUrl: string;
+  resourceDescription: string;
+}
+
+const emptySubmission: CourseSubmissionInput = {
+  title: "", summary: "", subject: "", level: "beginner", slug: "", provider: "", sourceUrl: "https://",
+  licenseName: "Review resource terms before reuse", licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+  attribution: "Submitted by a LearnFlow learner; verify attribution before reuse.", lessonTitle: "", lessonBody: "",
+  quizQuestion: "", quizOptions: "", quizAnswerIndex: 0, resourceTitle: "", resourceUrl: "", resourceDescription: "",
+};
+
 const resourceTypeLabels: Record<ResourceType, string> = {
   video: "Videos",
   lecture_notes: "Lecture notes",
@@ -211,6 +255,10 @@ function App() {
   const [editingResourceId, setEditingResourceId] = useState<string | null>(null);
   const [resourceForm, setResourceForm] = useState<CourseResourceInput>(emptyResource);
   const [resourceFile, setResourceFile] = useState<File | null>(null);
+  const [submissionOpen, setSubmissionOpen] = useState(false);
+  const [submissionForm, setSubmissionForm] = useState<CourseSubmissionInput>(emptySubmission);
+  const [mySubmissions, setMySubmissions] = useState<CourseSubmission[]>([]);
+  const [adminSubmissions, setAdminSubmissions] = useState<CourseSubmission[]>([]);
 
   const request = useCallback(async <T,>(url: string, init: RequestInit = {}): Promise<T> => {
     const headers = new Headers(init.headers);
@@ -237,12 +285,14 @@ function App() {
   }, [request, user]);
 
   const refreshAdminData = useCallback(async () => {
-    const [courseResult, userResult] = await Promise.all([
+    const [courseResult, userResult, submissionResult] = await Promise.all([
       request<{ courses: Course[] }>("/api/admin/courses"),
       request<{ users: User[] }>("/api/admin/users"),
+      request<{ submissions: CourseSubmission[] }>("/api/admin/submissions"),
     ]);
     setAdminCourses(courseResult.courses);
     setAdminUsers(userResult.users);
+    setAdminSubmissions(submissionResult.submissions);
   }, [request]);
 
   useEffect(() => {
@@ -317,6 +367,15 @@ function App() {
       refreshAdminData().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not load administration data."));
     }
   }, [page, user, refreshAdminData]);
+  useEffect(() => {
+    if (!user) {
+      setMySubmissions([]);
+      return;
+    }
+    request<{ submissions: CourseSubmission[] }>("/api/submissions/mine")
+      .then((result) => setMySubmissions(result.submissions))
+      .catch(() => undefined);
+  }, [user, request]);
 
   const completedLessonIds = useMemo(() => new Set(progress.map((entry) => entry.lesson_id)), [progress]);
   const completedCourses = useMemo(() => new Set(
@@ -514,12 +573,39 @@ function App() {
     setCourseFormOpen(false);
     setLessonCourseId(course.id);
     setEditingLessonId(null);
-    setLessonForm({ ...emptyLesson, position: course.lessons.length + 1 });
+    const nextPosition = course.lessons.reduce((highest, lesson) => Math.max(highest, lesson.position), 0) + 1;
+    setLessonForm({ ...emptyLesson, position: nextPosition });
   }
 
   async function saveLesson(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!lessonCourseId) return;
+    const title = lessonForm.title.trim();
+    const body = lessonForm.body.trim();
+    const question = lessonForm.quizQuestion?.trim() ?? "";
+    const options = lessonForm.quizOptions.map((option) => option.trim()).filter(Boolean);
+    if (title.length < 3) {
+      setError("Lesson title must be at least 3 characters.");
+      return;
+    }
+    if (body.length < 20) {
+      setError("Lesson content must be at least 20 characters.");
+      return;
+    }
+    if (question && (question.length < 5 || options.length < 2)) {
+      setError("A quiz needs a question of at least 5 characters and at least two answer choices.");
+      return;
+    }
+    if (question && lessonForm.quizAnswerIndex !== null && lessonForm.quizAnswerIndex >= options.length) {
+      setError("Select a valid correct choice for the quiz.");
+      return;
+    }
+    const owner = adminCourses.find((course) => course.id === lessonCourseId);
+    const duplicatePosition = owner?.lessons.some((lesson) => lesson.position === lessonForm.position && lesson.id !== editingLessonId);
+    if (duplicatePosition) {
+      setError(`Position ${lessonForm.position} is already used by another lesson in this course. Choose a different number.`);
+      return;
+    }
     clearMessages();
     setBusy(true);
     const payload: LessonInput = {
@@ -537,8 +623,7 @@ function App() {
       );
       setNotice(editingLessonId ? "Lesson updated." : "Lesson added.");
       setEditingLessonId(null);
-      const owner = adminCourses.find((course) => course.id === lessonCourseId);
-      setLessonForm({ ...emptyLesson, position: (owner?.lessons.length ?? 0) + 2 });
+      setLessonForm({ ...emptyLesson, position: lessonForm.position + (editingLessonId ? 0 : 1) });
       await Promise.all([refreshCourses(), refreshAdminData()]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not save this lesson.");
@@ -577,13 +662,26 @@ function App() {
 
   async function saveResource(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!resourceCourseId || !supabase) {
-      setError("Supabase is not configured. Course resources cannot be uploaded.");
+    if (!resourceCourseId) {
+      setError("Select a course before adding course material.");
+      return;
+    }
+    if (resourceFile && !supabase) {
+      setError("Supabase is not configured, so this file cannot be uploaded. Use an authorized HTTPS URL instead.");
+      return;
+    }
+    if (!resourceForm.url.trim() && !resourceFile && !(editingResourceId && adminCourses.find((entry) => entry.id === resourceCourseId)?.resources.find((resource) => resource.id === editingResourceId)?.storagePath)) {
+      setError("Enter an HTTPS URL or choose an authorized file to upload.");
       return;
     }
     const course = adminCourses.find((entry) => entry.id === resourceCourseId);
     if (!course) {
       setError("The selected course could not be found. Refresh administration data and try again.");
+      return;
+    }
+    const duplicatePosition = course.resources.some((resource) => resource.position === resourceForm.position && resource.id !== editingResourceId);
+    if (duplicatePosition) {
+      setError(`Position ${resourceForm.position} is already used by another course material. Choose a different display order.`);
       return;
     }
     clearMessages();
@@ -674,6 +772,67 @@ function App() {
     }
   }
 
+  async function submitCourse(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    clearMessages();
+    if (!user) {
+      setAuthMode("login");
+      setAuthOpen(true);
+      return;
+    }
+    const quizOptions = submissionForm.quizOptions.split("\n").map((value) => value.trim()).filter(Boolean);
+    const quizQuestion = submissionForm.quizQuestion.trim();
+    if (quizQuestion && (quizOptions.length < 2 || quizQuestion.length < 5)) {
+      setError("Provide at least two quiz choices and a quiz question of at least 5 characters.");
+      return;
+    }
+    const resources = submissionForm.resourceUrl.trim()
+      ? [{ type: "other" as ResourceType, title: submissionForm.resourceTitle.trim() || submissionForm.title.trim(), description: submissionForm.resourceDescription.trim(), licenseName: submissionForm.licenseName, attribution: submissionForm.attribution, url: submissionForm.resourceUrl.trim(), storagePath: null, contentType: null, position: 1 }]
+      : [];
+    const payload = {
+      course: {
+        slug: submissionForm.slug.trim(), title: submissionForm.title.trim(), summary: submissionForm.summary.trim(),
+        subject: submissionForm.subject.trim(), level: submissionForm.level, provider: submissionForm.provider.trim(),
+        sourceUrl: submissionForm.sourceUrl.trim(), licenseName: submissionForm.licenseName.trim(),
+        licenseUrl: submissionForm.licenseUrl.trim(), attribution: submissionForm.attribution.trim(),
+      },
+      lessons: [{ title: submissionForm.lessonTitle.trim(), body: submissionForm.lessonBody.trim(), position: 1,
+        quizQuestion: quizQuestion || null, quizOptions: quizQuestion ? quizOptions : [],
+        quizAnswerIndex: quizQuestion ? submissionForm.quizAnswerIndex : null }],
+      resources,
+    };
+    setBusy(true);
+    try {
+      await request<{ submission: { id: string } }>("/api/submissions", { method: "POST", body: JSON.stringify(payload) });
+      setNotice("Course submitted for administrator review. It will appear publicly only after approval.");
+      setSubmissionOpen(false);
+      setSubmissionForm(emptySubmission);
+      const result = await request<{ submissions: CourseSubmission[] }>("/api/submissions/mine");
+      setMySubmissions(result.submissions);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not submit the course.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reviewSubmission(submissionId: string, approve: boolean) {
+    const note = window.prompt(approve ? "Optional approval note" : "Reason for rejection", "") ?? "";
+    clearMessages();
+    setBusy(true);
+    try {
+      await request(`/api/admin/submissions/${submissionId}/${approve ? "approve" : "reject"}`, {
+        method: "POST", body: JSON.stringify({ note }),
+      });
+      setNotice(approve ? "Course approved and published." : "Course submission rejected.");
+      await Promise.all([refreshCourses(), refreshAdminData()]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not review this submission.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteCourse(course: Course) {
     if (!window.confirm(`Delete "${course.title}" and all of its lessons and learner progress? This cannot be undone.`)) return;
     clearMessages();
@@ -748,6 +907,7 @@ function App() {
         <nav className="main-nav" aria-label="Main navigation">
           <button className={page === "home" && !selectedCourse ? "nav-link active" : "nav-link"} onClick={resetToHome}>Explore</button>
           {user && <button className="nav-link" onClick={() => { setSelectedCourse(null); setPage("home"); document.getElementById("my-progress")?.scrollIntoView({ behavior: "smooth" }); }}>My learning</button>}
+          {user && <button className="nav-link" onClick={() => { setSubmissionOpen(true); clearMessages(); }}>Submit course</button>}
           {user?.role === "admin" && <button className={page === "admin" ? "nav-link active" : "nav-link"} onClick={() => { setPage("admin"); setSelectedCourse(null); clearMessages(); }}>Admin</button>}
         </nav>
         <div className="header-actions">
@@ -803,6 +963,8 @@ function App() {
             onDeleteResource={deleteResource}
             onSaveResource={saveResource}
             onUpdateUser={updateUserAccess}
+            submissions={adminSubmissions}
+            onReviewSubmission={reviewSubmission}
           />
         ) : selectedCourse ? (
           <CourseDetail
@@ -845,6 +1007,35 @@ function App() {
         <p>Learn openly. Build understanding. Keep moving forward.</p>
         <span>Open courses remain subject to their individual licenses.</span>
       </footer>
+
+      {submissionOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSubmissionOpen(false); }}>
+          <section className="auth-modal submission-modal" role="dialog" aria-modal="true" aria-labelledby="submission-title">
+            <button className="modal-close" onClick={() => setSubmissionOpen(false)} aria-label="Close submission form">×</button>
+            <span className="eyebrow">STUDENT CONTRIBUTION</span>
+            <h2 id="submission-title">Submit a course for review</h2>
+            <p className="muted">Your course and material will remain unpublished until an administrator approves them.</p>
+            <form className="form-stack submission-form" onSubmit={submitCourse}>
+              <div className="form-grid">
+                <label>Course title<input required minLength={3} maxLength={160} value={submissionForm.title} onChange={(e) => setSubmissionForm({ ...submissionForm, title: e.target.value, slug: e.target.value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') })} /></label>
+                <label>Course slug<input required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={submissionForm.slug} onChange={(e) => setSubmissionForm({ ...submissionForm, slug: e.target.value })} /></label>
+                <label>Subject<input required maxLength={80} value={submissionForm.subject} onChange={(e) => setSubmissionForm({ ...submissionForm, subject: e.target.value })} /></label>
+                <label>Level<select value={submissionForm.level} onChange={(e) => setSubmissionForm({ ...submissionForm, level: e.target.value as Level })}><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option><option value="all">All levels</option></select></label>
+                <label>Provider<input required maxLength={120} value={submissionForm.provider} onChange={(e) => setSubmissionForm({ ...submissionForm, provider: e.target.value })} /></label>
+                <label>Official source URL<input required type="url" value={submissionForm.sourceUrl} onChange={(e) => setSubmissionForm({ ...submissionForm, sourceUrl: e.target.value })} /></label>
+                <label className="field-span">Course summary<textarea required minLength={10} maxLength={1000} rows={3} value={submissionForm.summary} onChange={(e) => setSubmissionForm({ ...submissionForm, summary: e.target.value })} /></label>
+                <label>License name<input required maxLength={120} value={submissionForm.licenseName} onChange={(e) => setSubmissionForm({ ...submissionForm, licenseName: e.target.value })} /></label>
+                <label>License URL<input required type="url" value={submissionForm.licenseUrl} onChange={(e) => setSubmissionForm({ ...submissionForm, licenseUrl: e.target.value })} /></label>
+                <label className="field-span">Attribution<textarea required minLength={5} maxLength={500} rows={2} value={submissionForm.attribution} onChange={(e) => setSubmissionForm({ ...submissionForm, attribution: e.target.value })} /></label>
+              </div>
+              <div className="submission-section"><h3>First lesson</h3><div className="form-grid"><label>Lesson title<input required minLength={3} maxLength={160} value={submissionForm.lessonTitle} onChange={(e) => setSubmissionForm({ ...submissionForm, lessonTitle: e.target.value })} /></label><label className="field-span">Lesson content<textarea required minLength={20} maxLength={20000} rows={5} value={submissionForm.lessonBody} onChange={(e) => setSubmissionForm({ ...submissionForm, lessonBody: e.target.value })} /></label><label className="field-span">Quiz question (optional)<input value={submissionForm.quizQuestion} onChange={(e) => setSubmissionForm({ ...submissionForm, quizQuestion: e.target.value })} /></label>{submissionForm.quizQuestion && <><label className="field-span">Answer choices (one per line)<textarea required rows={3} value={submissionForm.quizOptions} onChange={(e) => setSubmissionForm({ ...submissionForm, quizOptions: e.target.value })} /></label><label>Correct choice number<input type="number" min={1} value={submissionForm.quizAnswerIndex + 1} onChange={(e) => setSubmissionForm({ ...submissionForm, quizAnswerIndex: Number(e.target.value) - 1 })} /></label></>}</div></div>
+              <div className="submission-section"><h3>Course material (optional)</h3><div className="form-grid"><label>Material title<input maxLength={160} value={submissionForm.resourceTitle} onChange={(e) => setSubmissionForm({ ...submissionForm, resourceTitle: e.target.value })} /></label><label>Material HTTPS URL<input type="url" value={submissionForm.resourceUrl} onChange={(e) => setSubmissionForm({ ...submissionForm, resourceUrl: e.target.value })} /></label><label className="field-span">Description<textarea maxLength={1000} rows={2} value={submissionForm.resourceDescription} onChange={(e) => setSubmissionForm({ ...submissionForm, resourceDescription: e.target.value })} /></label></div></div>
+              <button className="button button-primary button-wide" disabled={busy}>{busy ? "Submitting…" : "Submit for approval"}</button>
+            </form>
+            {mySubmissions.length > 0 && <div className="submission-history"><h3>My submissions</h3>{mySubmissions.slice(0, 5).map((submission) => <div key={submission.id}><strong>{submission.title}</strong><span className={`status-pill ${submission.status}`}>{submission.status}</span>{submission.review_note && <small>{submission.review_note}</small>}</div>)}</div>}
+          </section>
+        </div>
+      )}
 
       {authOpen && (
         <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAuthOpen(false); }}>
@@ -1169,6 +1360,8 @@ interface AdminPageProps {
   onDeleteResource: (resource: CourseResource) => void;
   onSaveResource: (event: React.FormEvent<HTMLFormElement>) => void;
   onUpdateUser: (user: User, role: Role, isActive: boolean) => void;
+  submissions: CourseSubmission[];
+  onReviewSubmission: (submissionId: string, approve: boolean) => void;
 }
 
 function AdminPage(props: AdminPageProps) {
@@ -1179,9 +1372,9 @@ function AdminPage(props: AdminPageProps) {
     onDeleteLesson, onSaveLesson, resourceCourseId, setResourceCourseId, editingResourceId,
     setEditingResourceId, resourceForm, setResourceForm,
     resourceFile, setResourceFile, onAddResource, onEditResource, onDeleteResource, onSaveResource,
-    onUpdateUser,
+    onUpdateUser, submissions, onReviewSubmission,
   } = props;
-  const [tab, setTab] = useState<"courses" | "users">("courses");
+  const [tab, setTab] = useState<"courses" | "users" | "submissions">("courses");
   const [lessonOptionsText, setLessonOptionsText] = useState(lessonForm.quizOptions.join("\n"));
   const courseFormRef = useRef<HTMLFormElement>(null);
   const lessonFormRef = useRef<HTMLFormElement>(null);
@@ -1199,7 +1392,7 @@ function AdminPage(props: AdminPageProps) {
   return (
     <section className="admin-page content-width">
       <div className="admin-welcome"><div><span className="eyebrow"><span className="eyebrow-dot" />LEARNFLOW ADMINISTRATION</span><h1>Manage your learning space.</h1><p>Maintain course metadata, lessons, publishing status, and learner access.</p></div><div className="admin-total"><strong>{courses.length}</strong><span>courses</span><strong>{users.length}</strong><span>accounts</span></div></div>
-      <div className="admin-tabs" role="tablist"><button role="tab" aria-selected={tab === "courses"} className={tab === "courses" ? "admin-tab selected" : "admin-tab"} onClick={() => setTab("courses")}>Courses <span>{courses.length}</span></button><button role="tab" aria-selected={tab === "users"} className={tab === "users" ? "admin-tab selected" : "admin-tab"} onClick={() => setTab("users")}>Learners <span>{users.length}</span></button></div>
+      <div className="admin-tabs" role="tablist"><button role="tab" aria-selected={tab === "courses"} className={tab === "courses" ? "admin-tab selected" : "admin-tab"} onClick={() => setTab("courses")}>Courses <span>{courses.length}</span></button><button role="tab" aria-selected={tab === "submissions"} className={tab === "submissions" ? "admin-tab selected" : "admin-tab"} onClick={() => setTab("submissions")}>Submissions <span>{submissions.filter((submission) => submission.status === "pending").length}</span></button><button role="tab" aria-selected={tab === "users"} className={tab === "users" ? "admin-tab selected" : "admin-tab"} onClick={() => setTab("users")}>Learners <span>{users.length}</span></button></div>
 
       {tab === "courses" ? <section className="admin-panel">
         <div className="admin-panel-heading"><div><h2>Course catalog</h2><p>Published courses are visible to learners. Keep license and attribution information accurate.</p></div><button className="button button-primary" onClick={onNewCourse}>+ Add course</button></div>
@@ -1224,7 +1417,7 @@ function AdminPage(props: AdminPageProps) {
 
         {lessonCourseId && <form ref={lessonFormRef} className="admin-form lesson-admin-form" onSubmit={onSaveLesson}><div className="form-heading"><div><span className="eyebrow">{editingLessonId ? "EDIT LESSON" : "NEW LESSON"}</span><h3>{editingLessonId ? "Update lesson" : "Add a course lesson"}</h3><p className="admin-form-course">For course: <strong>{lessonCourse?.title ?? "Course unavailable"}</strong></p></div><button type="button" className="button button-quiet button-small" onClick={() => { setLessonCourseId(null); setEditingLessonId(null); setLessonForm({ ...emptyLesson }); }}>Close</button></div><div className="form-grid"><label>Lesson title<input required value={lessonForm.title} onChange={(e) => setLessonForm({ ...lessonForm, title: e.target.value })} /></label><label>Position<input type="number" min={1} value={lessonForm.position} onChange={(e) => setLessonForm({ ...lessonForm, position: Number(e.target.value) })} /></label><label className="field-span">Lesson content<textarea required rows={7} value={lessonForm.body} onChange={(e) => setLessonForm({ ...lessonForm, body: e.target.value })} /></label><label className="field-span">Quiz question (optional)<input value={lessonForm.quizQuestion ?? ""} onChange={(e) => setLessonForm({ ...lessonForm, quizQuestion: e.target.value })} /></label>{lessonForm.quizQuestion && <><label className="field-span">Answer choices (one per line)<textarea required rows={4} value={lessonOptionsText} onChange={(e) => { setLessonOptionsText(e.target.value); setLessonForm({ ...lessonForm, quizOptions: e.target.value.split("\n").map((option) => option.trim()).filter(Boolean) }); }} /></label><label>Correct choice number<select value={lessonForm.quizAnswerIndex ?? 0} onChange={(e) => setLessonForm({ ...lessonForm, quizAnswerIndex: Number(e.target.value) })}>{lessonForm.quizOptions.map((option, index) => <option key={`${index}-${option}`} value={index}>{index + 1}. {option || `Choice ${index + 1}`}</option>)}</select><small>The answer stays private; learners only receive the options.</small></label></>}</div><div className="form-actions"><button className="button button-primary" disabled={busy}>{busy ? "Saving…" : editingLessonId ? "Save lesson" : "Add lesson"}</button></div></form>}
         {resourceCourseId && <form className="admin-form lesson-admin-form" onSubmit={onSaveResource}><div className="form-heading"><div><span className="eyebrow">{editingResourceId ? "EDIT MATERIAL" : "NEW MATERIAL"}</span><h3>{editingResourceId ? "Update course material" : "Add course material"}</h3><p className="admin-form-course">For course: <strong>{resourceCourse?.title ?? "Course unavailable"}</strong></p></div><button type="button" className="button button-quiet button-small" onClick={() => { setResourceCourseId(null); setEditingResourceId(null); setResourceForm({ ...emptyResource }); setResourceFile(null); }}>Close</button></div><div className="form-grid"><label>Material type<select value={resourceForm.type} onChange={(event) => setResourceForm({ ...resourceForm, type: event.target.value as ResourceType })}>{Object.entries(resourceTypeLabels).map(([type, label]) => <option key={type} value={type}>{label}</option>)}</select></label><label>Display order<input type="number" min={1} value={resourceForm.position} onChange={(event) => setResourceForm({ ...resourceForm, position: Number(event.target.value) })} /></label><label className="field-span">Title<input required minLength={2} maxLength={160} value={resourceForm.title} onChange={(event) => setResourceForm({ ...resourceForm, title: event.target.value })} /></label><label className="field-span">Description<textarea rows={2} maxLength={1000} value={resourceForm.description} onChange={(event) => setResourceForm({ ...resourceForm, description: event.target.value })} /></label><label>Resource license<input required minLength={2} maxLength={120} value={resourceForm.licenseName} onChange={(event) => setResourceForm({ ...resourceForm, licenseName: event.target.value })} placeholder="e.g. CC BY-NC-SA 4.0" /><small>Confirm the terms for this specific resource.</small></label><label>Attribution<textarea rows={2} maxLength={500} value={resourceForm.attribution} onChange={(event) => setResourceForm({ ...resourceForm, attribution: event.target.value })} placeholder="Creator, source, and required credit" /></label><label className="field-span">Official HTTPS URL<input type="url" value={resourceForm.url} onChange={(event) => { setResourceForm({ ...resourceForm, url: event.target.value }); if (event.target.value) setResourceFile(null); }} placeholder="https://..." /><small>Use a direct file URL or the official provider page.</small></label><label className="field-span">Or upload an authorized file<input type="file" accept=".pdf,.zip,.txt,.md,.mp4,.webm,.mov,.mp3,.m4a,.wav,application/pdf,video/mp4,video/webm,audio/mpeg" onChange={(event) => { const file = event.target.files?.[0] ?? null; setResourceFile(file); if (file) setResourceForm({ ...resourceForm, url: "" }); }} />{resourceFile && <small>Selected file: {resourceFile.name}</small>}<small>Uploads are public and downloadable, up to 100 MB. Upload only materials you have permission to redistribute.</small></label></div><div className="form-actions"><button className="button button-primary" disabled={busy}>{busy ? "Saving…" : editingResourceId ? "Save material" : "Add material"}</button></div></form>}
-      </section> : <section className="admin-panel"><div className="admin-panel-heading"><div><h2>Learner accounts</h2><p>Deactivate accounts or change account roles. Protect administrator access.</p></div></div><div className="user-table-wrap"><table className="user-table"><thead><tr><th>LEARNER</th><th>ROLE</th><th>STATUS</th><th>JOINED</th><th>ACCESS</th></tr></thead><tbody>{users.map((account) => <tr key={account.id}><td><strong>{account.fullName}</strong><small>{account.email}</small></td><td><span className="role-pill">{account.role}</span></td><td><span className={account.isActive ? "status-dot active-dot" : "status-dot inactive-dot"} />{account.isActive ? "Active" : "Inactive"}</td><td>{new Date(account.createdAt).toLocaleDateString()}</td><td><div className="user-actions"><select aria-label={`Role for ${account.email}`} value={account.role} onChange={(event) => onUpdateUser(account, event.target.value as Role, account.isActive)}><option value="learner">Learner</option><option value="admin">Admin</option></select><button className="text-button" onClick={() => onUpdateUser(account, account.role, !account.isActive)}>{account.isActive ? "Deactivate" : "Reactivate"}</button></div></td></tr>)}</tbody></table>{!users.length && <p className="muted empty-table">No learner accounts have registered yet.</p>}</div></section>}
+      </section> : tab === "submissions" ? <section className="admin-panel"><div className="admin-panel-heading"><div><h2>Student course submissions</h2><p>Review course content and materials before publishing them to learners.</p></div></div><div className="submission-review-list">{submissions.map((submission) => <article className="submission-review-card" key={submission.id}><div className="submission-review-heading"><div><strong>{submission.title}</strong><small>{submission.submitter_name} · {submission.submitter_email}</small></div><span className={`status-pill ${submission.status}`}>{submission.status}</span></div>{submission.payload && <p>{String(submission.payload.course.summary ?? "")}</p>}<div className="submission-review-actions">{submission.status === "pending" ? <><button className="button button-primary button-small" disabled={busy} onClick={() => onReviewSubmission(submission.id, true)}>Approve & publish</button><button className="button button-danger button-small" disabled={busy} onClick={() => onReviewSubmission(submission.id, false)}>Reject</button></> : submission.review_note ? <small>Review: {submission.review_note}</small> : null}</div></article>)}{!submissions.length && <p className="muted empty-table">No course submissions have been received yet.</p>}</div></section> : <section className="admin-panel"><div className="admin-panel-heading"><div><h2>Learner accounts</h2><p>Deactivate accounts or change account roles. Protect administrator access.</p></div></div><div className="user-table-wrap"><table className="user-table"><thead><tr><th>LEARNER</th><th>ROLE</th><th>STATUS</th><th>JOINED</th><th>ACCESS</th></tr></thead><tbody>{users.map((account) => <tr key={account.id}><td><strong>{account.fullName}</strong><small>{account.email}</small></td><td><span className="role-pill">{account.role}</span></td><td><span className={account.isActive ? "status-dot active-dot" : "status-dot inactive-dot"} />{account.isActive ? "Active" : "Inactive"}</td><td>{new Date(account.createdAt).toLocaleDateString()}</td><td><div className="user-actions"><select aria-label={`Role for ${account.email}`} value={account.role} onChange={(event) => onUpdateUser(account, event.target.value as Role, account.isActive)}><option value="learner">Learner</option><option value="admin">Admin</option></select><button className="text-button" onClick={() => onUpdateUser(account, account.role, !account.isActive)}>{account.isActive ? "Deactivate" : "Reactivate"}</button></div></td></tr>)}</tbody></table>{!users.length && <p className="muted empty-table">No learner accounts have registered yet.</p>}</div></section>}
       <p className="admin-security-note"><strong>Security reminder:</strong> first admin access is granted directly in PostgreSQL. Never expose database credentials or the session secret in the browser.</p>
     </section>
   );

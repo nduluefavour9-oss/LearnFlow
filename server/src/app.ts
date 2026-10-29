@@ -61,7 +61,15 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   }
   const databaseError = error as { code?: string; constraint?: string; message?: string };
   if (databaseError.code === "23505") {
-    res.status(409).json({ error: "That value is already in use." });
+    if (databaseError.constraint === "lessons_course_id_position_key") {
+      res.status(409).json({ error: "Lesson position is already used in this course. Choose a different position." });
+      return;
+    }
+    if (databaseError.constraint === "course_resources_course_id_position_key") {
+      res.status(409).json({ error: "Course material position is already used in this course. Choose a different display order." });
+      return;
+    }
+    res.status(409).json({ error: "That value is already in use by another record." });
     return;
   }
   if (databaseError.code === "23503" || databaseError.code === "23514") {

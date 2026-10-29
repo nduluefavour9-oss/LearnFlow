@@ -49,6 +49,37 @@ export const courseResourceSchema = z.object({
   message: "Provide exactly one external URL or Supabase Storage file path.",
 });
 
+export const courseSubmissionSchema = z.object({
+  course: z.object({
+    slug: z.string().trim().min(2).max(100).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+    title: z.string().trim().min(3).max(160),
+    summary: z.string().trim().min(10).max(1000),
+    subject: z.string().trim().min(2).max(80),
+    level: z.enum(["beginner", "intermediate", "advanced", "all"]),
+    provider: z.string().trim().min(2).max(120),
+    sourceUrl: safeExternalUrl,
+    licenseName: z.string().trim().min(2).max(120),
+    licenseUrl: safeExternalUrl,
+    attribution: z.string().trim().min(5).max(500),
+  }),
+  lessons: z.array(lessonSchema).max(100),
+  resources: z.array(z.object({
+    type: z.enum(["video", "lecture_notes", "exam", "assignment", "problem_set", "other"]),
+    title: z.string().trim().min(2).max(160),
+    description: z.string().trim().max(1000).default(""),
+    licenseName: z.string().trim().min(2).max(120),
+    attribution: z.string().trim().max(500).default(""),
+    url: safeExternalUrl,
+    storagePath: z.null(),
+    contentType: z.null(),
+    position: z.number().int().min(1).max(5000),
+  })).max(50),
+});
+
+export const reviewSubmissionSchema = z.object({
+  note: z.string().trim().max(1000).default(""),
+});
+
 export const userUpdateSchema = z.object({
   role: z.enum(["learner", "admin"]),
   isActive: z.boolean(),

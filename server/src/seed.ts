@@ -1030,16 +1030,17 @@ async function seed() {
       ]);
 
       for (const [index, topicName] of topicNames.entries()) {
-        const concept = concepts[index % concepts.length];
+        const conceptIndex = Math.floor(index / 4);
+        const angleIndex = index % 4;
+        const concept = concepts[conceptIndex];
         const lessonTitle = topicName;
         const angle = [
           "Define the key terms, scope, inputs, outputs, and assumptions. Compare one correct definition with a misleading shorthand, then connect the idea to the purpose of the course.",
           "Explain the underlying principle or model, show how its parts interact, and identify the conditions under which the principle is valid.",
           "Work through a small concrete example step by step. State assumptions, apply the appropriate method, show intermediate reasoning, and check whether the result is reasonable.",
           "Evaluate the topic in a realistic situation. Compare alternatives, identify constraints and trade-offs, justify a decision, and note how the conclusion could change with different evidence.",
-        ][Math.floor(index / concepts.length)];
+        ][angleIndex];
         const body = [
-          `Topic: ${topicName}`,
           `Core idea: In ${course.title}, ${concept} should be understood as a reasoned process rather than an isolated definition. ${angle}`,
           `Study prompt: Explain "${topicName}" in your own words, give one practical example, and identify one common misconception or constraint.`,
         ].join("\n\n");
@@ -1050,39 +1051,25 @@ async function seed() {
           `Ignore evidence and constraints when evaluating ${topicName}.`,
         ];
         const quizQuestion = `Which response demonstrates the strongest understanding of ${topicName}?`;
-        const existing = await client.query<{ id: string; title: string }>(
-          "SELECT id, title FROM lessons WHERE course_id = $1 AND position = $2",
-          [row.id, index + 1],
+        await client.query(
+          `INSERT INTO lessons
+            (course_id, title, body, position, quiz_question, quiz_options, quiz_answer_index)
+           VALUES ($1, $2, $3, $4, $5, $6::jsonb, 0)
+           ON CONFLICT (course_id, position) DO UPDATE SET
+             title = EXCLUDED.title,
+             body = EXCLUDED.body,
+             quiz_question = EXCLUDED.quiz_question,
+             quiz_options = EXCLUDED.quiz_options,
+             quiz_answer_index = EXCLUDED.quiz_answer_index`,
+          [
+            row.id,
+            title,
+            `${body}\n\nPractice task: Complete a short worked example for "${topicName}". Record your assumptions, show each step, and check whether the result is reasonable.`,
+            index + 1,
+            quizQuestion,
+            JSON.stringify(options),
+          ],
         );
-
-        if (!existing.rowCount) {
-          await client.query(
-            `INSERT INTO lessons
-              (course_id, title, body, position, quiz_question, quiz_options, quiz_answer_index)
-             VALUES ($1, $2, $3, $4, $5, $6::jsonb, 0)`,
-            [
-              row.id,
-              title,
-              `${body}\n\nPractice task: Complete a short worked example for "${topicName}". Record your assumptions, show each step, and check whether the result is reasonable.`,
-              index + 1,
-              quizQuestion,
-              JSON.stringify(options),
-            ],
-          );
-        } else if (existing.rows[0].title.startsWith(`${course.title}:`)) {
-          await client.query(
-            `UPDATE lessons
-             SET title = $2, body = $3, quiz_question = $4, quiz_options = $5::jsonb, quiz_answer_index = 0
-             WHERE id = $1`,
-            [
-              existing.rows[0].id,
-              title,
-              `${body}\n\nPractice task: Complete a short worked example for "${topicName}". Record your assumptions, show each step, and check whether the result is reasonable.`,
-              quizQuestion,
-              JSON.stringify(options),
-            ],
-          );
-        }
       }
 
       await client.query(

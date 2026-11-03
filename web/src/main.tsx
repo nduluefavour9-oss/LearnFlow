@@ -1206,6 +1206,9 @@ interface CourseDetailProps {
 function CourseDetail(props: CourseDetailProps) {
   const { course, user, completedLessonIds, answers, quizFeedback, setAnswer, busy, onBack, onComplete, onOpenAuth } = props;
   const lessonsComplete = course.lessons.filter((lesson) => completedLessonIds.has(lesson.id)).length;
+  const lessonDisplayTitle = (lesson: Lesson) => lesson.title.startsWith(`${course.title}: `)
+    ? lesson.title.slice(course.title.length + 2)
+    : lesson.title;
   const renderLessonBody = (lesson: Lesson) => lesson.body.split(/\n\n+/).map((paragraph, index) => {
     const [label, ...rest] = paragraph.match(/^(Topic|Core idea|Study prompt):\s*(.+)$/s)?.slice(1) ?? [];
     if (label && rest.length) {
@@ -1260,9 +1263,9 @@ function CourseDetail(props: CourseDetailProps) {
                 {isVideo && <video className="course-video" controls preload="metadata" src={url}>Your browser does not support embedded video.</video>}
                 <div className="resource-terms"><strong>{resource.licenseName}</strong>{resource.attribution && <p>{resource.attribution}</p>}</div>
               </article>;
-            })}</div></section>) : <div className="material-empty"><strong>{course.provider === "Legacy University Okija" ? "Focused study guides are ready." : "Course materials are being added."}</strong><p>{course.provider === "Legacy University Okija" ? "Follow the five structured lessons below and complete each knowledge check. Your lecturer can add official course materials separately." : "Lecture videos, notes, exams, assignments, and problem sets will appear here as they are added."}</p>{course.provider !== "Legacy University Okija" && <a href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Browse the official course materials ↗</a>}</div>}
+            })}</div></section>) : <div className="material-empty"><strong>{course.provider === "Legacy University Okija" ? "Focused study guides are ready." : "Course materials are being added."}</strong><p>{course.provider === "Legacy University Okija" ? "Follow the 20 structured topics below and complete each knowledge check. Your lecturer can add official course materials separately." : "Lecture videos, notes, exams, assignments, and problem sets will appear here as they are added."}</p>{course.provider !== "Legacy University Okija" && <a href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Browse the official course materials ↗</a>}</div>}
           </section>
-          <div className="study-guide-notice"><div><strong>Original LearnFlow study guides</strong><p>These concise topic summaries and questions are original study aids, not the full university course. For detailed explanations, lectures, readings, downloadable notes, and complete assignments, use the provider's official materials and follow their terms.</p></div><a href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Study the full official course ↗</a></div>
+          <div className="study-guide-notice"><div><strong>Original LearnFlow study guides</strong><p>{course.provider === "Legacy University Okija" ? "These concise topic summaries, practical prompts, and knowledge checks provide a structured introduction to the course. Your administrator can add official lecture notes, readings, and assignments when they are available." : "These concise topic summaries and questions are original study aids, not the full university course. For detailed explanations, lectures, readings, downloadable notes, and complete assignments, use the provider's official materials and follow their terms."}</p></div>{course.provider !== "Legacy University Okija" && <a href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Study the full official course ↗</a>}</div>
           <div className="lesson-column-heading"><div><span className="eyebrow">COURSE CONTENT</span><h2>Your learning path</h2></div>{course.lessons.length > 0 && <span className="progress-count">{lessonsComplete} / {course.lessons.length} complete</span>}</div>
           {course.lessons.length ? course.lessons.map((lesson) => {
             const complete = completedLessonIds.has(lesson.id);
@@ -1271,8 +1274,8 @@ function CourseDetail(props: CourseDetailProps) {
               <article className="lesson-card" key={lesson.id}>
                 <div className="lesson-number">{String(lesson.position).padStart(2, "0")}</div>
                 <div className="lesson-content">
-                  <h3>{lesson.title}</h3>
-                  <p className="lesson-text">{renderLessonBody(lesson)}</p>
+                  <h3>{lessonDisplayTitle(lesson)}</h3>
+                  <div className="lesson-text">{renderLessonBody(lesson)}</div>
                   {lesson.quizQuestion ? (
                     <fieldset className="lesson-quiz">
                       <legend>Check your understanding</legend>

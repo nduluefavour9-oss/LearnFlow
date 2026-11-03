@@ -1216,7 +1216,9 @@ function CourseDetail(props: CourseDetailProps) {
     });
   const getResourceUrl = (resource: CourseResource) => resource.storagePath
     ? supabase?.storage.from("course-materials").getPublicUrl(resource.storagePath).data.publicUrl ?? ""
-    : resource.url ?? "";
+    : course.provider === "Legacy University Okija" && resource.url === course.sourceUrl
+      ? ""
+      : resource.url ?? "";
   const resourceGroups = (Object.keys(resourceTypeLabels) as ResourceType[])
     .map((type) => ({
       type,
@@ -1254,7 +1256,7 @@ function CourseDetail(props: CourseDetailProps) {
                 {isVideo && <video className="course-video" controls preload="metadata" src={url}>Your browser does not support embedded video.</video>}
                 <div className="resource-terms"><strong>{resource.licenseName}</strong>{resource.attribution && <p>{resource.attribution}</p>}</div>
               </article>;
-            })}</div></section>) : <div className="material-empty"><strong>Course materials are being added.</strong><p>Lecture videos, notes, exams, assignments, and problem sets will appear here as they are added.</p><a href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Browse the official course materials ↗</a></div>}
+            })}</div></section>) : <div className="material-empty"><strong>{course.provider === "Legacy University Okija" ? "Focused study guides are ready." : "Course materials are being added."}</strong><p>{course.provider === "Legacy University Okija" ? "Follow the five structured lessons below and complete each knowledge check. Your lecturer can add official course materials separately." : "Lecture videos, notes, exams, assignments, and problem sets will appear here as they are added."}</p>{course.provider !== "Legacy University Okija" && <a href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Browse the official course materials ↗</a>}</div>}
           </section>
           <div className="study-guide-notice"><div><strong>Original LearnFlow study guides</strong><p>These concise topic summaries and questions are original study aids, not the full university course. For detailed explanations, lectures, readings, downloadable notes, and complete assignments, use the provider's official materials and follow their terms.</p></div><a href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Study the full official course ↗</a></div>
           <div className="lesson-column-heading"><div><span className="eyebrow">COURSE CONTENT</span><h2>Your learning path</h2></div>{course.lessons.length > 0 && <span className="progress-count">{lessonsComplete} / {course.lessons.length} complete</span>}</div>
@@ -1321,9 +1323,9 @@ function CourseDetail(props: CourseDetailProps) {
                 <span className={complete ? "lesson-status is-complete" : "lesson-status"}>{complete ? "✓" : "○"}</span>
               </article>
             );
-          }) : <div className="empty-state"><h3>No lessons have been added yet.</h3><p>{course.provider === "Legacy University Okija" ? "The university administrator can add lessons, quizzes, and assignment links for this course." : "This catalog entry links to the provider's official course materials. We link out rather than copy materials whose licenses may restrict reuse."}</p><a className="button button-secondary" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">{course.provider === "Legacy University Okija" ? "Visit Legacy University ↗" : "Open official course ↗"}</a></div>}
+          }) : <div className="empty-state"><h3>No lessons have been added yet.</h3><p>{course.provider === "Legacy University Okija" ? "The university administrator can add course-specific lessons and quizzes." : "This catalog entry links to the provider's official course materials. We link out rather than copy materials whose licenses may restrict reuse."}</p>{course.provider !== "Legacy University Okija" && <a className="button button-secondary" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Open official course ↗</a>}</div>}
         </div>
-        <aside className="course-source-card"><span className="eyebrow">COURSE SOURCE</span><h3>Continue with the provider</h3><p>Open the official course for its full syllabus, activities, and course-specific resources.</p><a className="button button-primary button-wide" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Visit official course ↗</a><div className="source-detail"><span>PROVIDER</span><strong>{course.provider}</strong></div><div className="source-detail"><span>LICENSE</span><strong>{course.licenseName}</strong><a href={course.licenseUrl} target="_blank" rel="noopener noreferrer">Review reuse terms ↗</a></div><div className="source-attribution"><span>ATTRIBUTION</span><p>{course.attribution}</p></div></aside>
+        <aside className="course-source-card"><span className="eyebrow">{course.provider === "Legacy University Okija" ? "COURSE INFORMATION" : "COURSE SOURCE"}</span><h3>{course.provider === "Legacy University Okija" ? "LearnFlow study course" : "Continue with the provider"}</h3><p>{course.provider === "Legacy University Okija" ? "Use the structured lessons and knowledge checks in this portal. Official university materials should be added by an administrator when available." : "Open the official course for its full syllabus, activities, and course-specific resources."}</p>{course.provider !== "Legacy University Okija" && <a className="button button-primary button-wide" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Visit official course ↗</a>}<div className="source-detail"><span>PROVIDER</span><strong>{course.provider}</strong></div><div className="source-detail"><span>LICENSE</span><strong>{course.licenseName}</strong>{course.provider !== "Legacy University Okija" && <a href={course.licenseUrl} target="_blank" rel="noopener noreferrer">Review reuse terms ↗</a>}</div><div className="source-attribution"><span>ATTRIBUTION</span><p>{course.attribution}</p></div></aside>
       </div>
     </section>
   );

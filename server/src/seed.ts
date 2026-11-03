@@ -328,6 +328,65 @@ const legacyUniversityCourses = [
   attribution: "Legacy University Okija, Department of Computer Science. Confirm permission and attribution for each course material before reusing it.",
 }));
 
+const legacyCourseProfiles: Record<string, { summary: string; concepts: string[] }> = {
+  "legacy-computer-performance-evaluation": {
+    summary: "Learn how to measure, model, analyze, and improve the performance of computer systems. Topics include benchmarks, workloads, queueing models, simulation, and capacity planning.",
+    concepts: ["performance metrics", "workload and benchmark design", "queueing models", "bottleneck analysis", "capacity planning and trade-offs"],
+  },
+  "legacy-artificial-intelligence": {
+    summary: "Explore the core ideas of artificial intelligence, including intelligent agents, search, knowledge representation, machine learning, uncertainty, and responsible AI.",
+    concepts: ["intelligent agents", "search and planning", "knowledge representation", "machine learning", "uncertainty and responsible AI"],
+  },
+  "legacy-remote-sensing-gis": {
+    summary: "Study remote-sensing data, geographic information systems, spatial analysis, cartography, raster and vector models, and geographic decision support.",
+    concepts: ["remote-sensing principles", "raster and vector data", "map projections and coordinate systems", "spatial analysis", "geographic decision support"],
+  },
+  "legacy-information-systems-management": {
+    summary: "Understand how organizations plan, acquire, govern, secure, and evaluate information systems to support strategy, operations, and decision-making.",
+    concepts: ["IS strategy and alignment", "systems planning and acquisition", "governance and controls", "information security management", "IS evaluation and benefits realization"],
+  },
+  "legacy-data-communication-networks": {
+    summary: "Study principles of data communication and computer networking, from transmission and protocols to addressing, routing, switching, and network services.",
+    concepts: ["signals and transmission", "protocol layers and encapsulation", "addressing and switching", "routing and transport services", "network security and troubleshooting"],
+  },
+  "legacy-net-centric-computing": {
+    summary: "Learn the architectural and protocol foundations of network-centric applications, distributed web systems, APIs, services, security, and scalability.",
+    concepts: ["client-server architecture", "HTTP and web APIs", "distributed services", "authentication and secure communication", "scalability and resilience"],
+  },
+  "legacy-project-management": {
+    summary: "Learn practical project-management methods for defining scope, estimating work, scheduling, managing risk, communicating, and controlling delivery.",
+    concepts: ["project initiation and scope", "work breakdown and estimation", "scheduling and critical paths", "risk and stakeholder management", "execution and project closeout"],
+  },
+  "legacy-organization-programming-languages": {
+    summary: "Compare programming-language paradigms and the principles used to design, parse, type-check, translate, and execute languages.",
+    concepts: ["language syntax and semantics", "lexical analysis and parsing", "names, scopes, and binding", "type systems", "runtime organization and evaluation"],
+  },
+  "legacy-software-engineering": {
+    summary: "Apply software-engineering practices for requirements, architecture, implementation, verification, maintenance, teamwork, and quality management.",
+    concepts: ["requirements engineering", "software architecture and design", "implementation quality", "testing and verification", "maintenance and project delivery"],
+  },
+  "legacy-computer-graphics-visualization": {
+    summary: "Study the fundamentals of computer graphics and visualization, including rendering pipelines, transformations, shading, data encoding, and interaction.",
+    concepts: ["graphics pipeline and rendering", "coordinates and transformations", "color, lighting, and shading", "visual perception and encoding", "interactive visualization"],
+  },
+  "legacy-computer-modelling-simulation": {
+    summary: "Learn to build, validate, execute, and evaluate computational models for systems whose behavior is difficult to analyze experimentally.",
+    concepts: ["model formulation", "system state and events", "randomness and sampling", "validation and verification", "simulation analysis and reporting"],
+  },
+  "legacy-algorithm-complexity": {
+    summary: "Develop skill in designing correct algorithms and analyzing their time, space, and complexity across theoretical and practical problem settings.",
+    concepts: ["algorithm design patterns", "asymptotic complexity", "recurrence relations", "greedy and divide-and-conquer methods", "NP-completeness and tractability"],
+  },
+  "legacy-research-methodology-technical-writing": {
+    summary: "Learn the research process and professional technical writing, from literature review and methodology to evidence, structure, citation, and presentation.",
+    concepts: ["research questions and literature review", "study design and methodology", "data collection and validity", "technical structure and evidence", "citation, revision, and presentation"],
+  },
+  "legacy-distributed-computing": {
+    summary: "Explore distributed-system principles including communication, synchronization, consistency, fault tolerance, replication, coordination, and cloud scalability.",
+    concepts: ["distributed architectures", "network communication and synchronization", "consistency and replication", "fault tolerance and recovery", "distributed coordination and scalability"],
+  },
+};
+
 const courseDetailsBySlug: Record<string, CourseDetails> = {
   "harvard-cs50x-2026": {
     description: "Harvard’s introduction to the intellectual enterprises of computer science and the art of programming, for students with or without prior programming experience. Topics include computational thinking, abstraction, algorithms, data structures, C, Python, SQL, and web development, culminating in a final project.",
@@ -905,11 +964,12 @@ async function seed() {
     }
 
     for (const course of legacyUniversityCourses) {
+      const profile = legacyCourseProfiles[course.slug];
       await client.query(
         `INSERT INTO courses
           (slug, title, summary, subject, level, provider, source_url, license_name, license_url,
            attribution, details, is_published)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, '{}'::jsonb, TRUE)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, TRUE)
          ON CONFLICT (slug) DO UPDATE SET
            details = EXCLUDED.details,
            is_published = EXCLUDED.is_published,
@@ -925,7 +985,7 @@ async function seed() {
         [
           course.slug,
           course.title,
-          course.summary,
+          profile?.summary ?? course.summary,
           course.subject,
           course.level,
           course.provider,
@@ -933,6 +993,10 @@ async function seed() {
           course.licenseName,
           course.licenseUrl,
           course.attribution,
+          JSON.stringify({
+            description: profile?.summary ?? course.summary,
+            learningResourceTypes: ["LearnFlow study guide", "Knowledge check", "Practical application"],
+          }),
         ],
       );
     }
@@ -944,55 +1008,75 @@ async function seed() {
     for (const row of legacyCourseIds.rows) {
       const course = legacyUniversityCourses.find((item) => item.slug === row.slug);
       if (!course) continue;
-      const legacyLessons = [
-        ["Course foundations", "Start by defining the purpose, scope, and key terminology of the course. Use examples to connect each new term to a practical problem in the field."],
-        ["Core concepts and models", "Break the subject into its central concepts, inputs, processes, outputs, and constraints. Compare how those ideas appear in simple and realistic scenarios."],
-        ["Problem solving practice", "Solve a representative problem in small steps: identify the known information, choose a method, execute it carefully, and verify the result."],
-        ["Application and analysis", "Apply the course concepts to a new situation. Explain your assumptions, evaluate alternatives, and support your conclusion with evidence."],
-        ["Review and integrated project", "Review the course themes and produce a short written summary or practical project that connects the foundational ideas to the techniques studied."],
+      const profile = legacyCourseProfiles[row.slug];
+      const concepts = profile?.concepts ?? [
+        "course foundations",
+        "core concepts",
+        "practical methods",
+        "analysis and application",
+        "review and synthesis",
+      ];
+
+      const lessonStages = [
+        ["Foundations and learning outcomes", `Begin ${course.title} by defining the course's purpose, vocabulary, assumptions, and expected learning outcomes. Focus on ${concepts[0]} and explain why it matters to the field.`, `Which is the best starting point for ${course.title}?`],
+        ["Core concepts and models", `Study ${concepts[1]}. Explain how it relates to the course's assumptions, identify its inputs and outputs, and use a small example to distinguish it from nearby concepts.`, `What most clearly demonstrates understanding of ${concepts[1]}?`],
+        ["Methods and practical problem-solving", `Apply a structured method to ${concepts[2]}. State the problem, select relevant information, execute the method, check intermediate results, and verify the final result.`, `After applying a method in ${course.title}, which step validates the result?`],
+        ["Analysis and real-world application", `Analyze ${concepts[3]} in a realistic scenario. Compare at least two choices, identify constraints and trade-offs, and support your conclusion with evidence.`, `Which action is strongest when evaluating ${concepts[3]}?`],
+        ["Integrated review and project", `Synthesize ${concepts[4]}. Create a short case study or worked example that connects the course foundations, methods, evidence, and analysis.`, `What is the best way to demonstrate mastery of ${concepts[4]}?`],
       ] as const;
 
-      for (const [index, [title, body]] of legacyLessons.entries()) {
-        await client.query(
-          `INSERT INTO lessons
-            (course_id, title, body, position, quiz_question, quiz_options, quiz_answer_index)
-           VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
-           ON CONFLICT (course_id, position) DO NOTHING`,
-          [
-            row.id,
-            `${course.title}: ${title}`,
-            `${body}\n\nStudy task: Read the relevant chapter or lecture notes supplied by Legacy University Okija, summarize one key idea in your own words, and test your understanding before continuing.`,
-            index + 1,
-            `Which study step best demonstrates understanding in ${course.title}?`,
-            JSON.stringify(["Explain the idea and apply it to a new example.", "Copy a definition without checking it.", "Skip examples and assume the topic is understood."]),
-            0,
-          ],
+      for (const [index, [lessonTitle, body, quizQuestion]] of lessonStages.entries()) {
+        const title = `${course.title}: ${lessonTitle}`;
+        const options = [
+          "Explain the idea and apply it correctly to a concrete example.",
+          "Repeat a definition without testing it.",
+          "Ignore constraints and assume the first answer is valid.",
+        ];
+        const existing = await client.query<{ id: string; title: string }>(
+          "SELECT id, title FROM lessons WHERE course_id = $1 AND position = $2",
+          [row.id, index + 1],
         );
+
+        if (!existing.rowCount) {
+          await client.query(
+            `INSERT INTO lessons
+              (course_id, title, body, position, quiz_question, quiz_options, quiz_answer_index)
+             VALUES ($1, $2, $3, $4, $5, $6::jsonb, 0)`,
+            [
+              row.id,
+              title,
+              `${body}\n\nPractice task: Complete a short worked example for "${concepts[index]}". Record your assumptions, show each step, and check whether the result is reasonable.`,
+              index + 1,
+              quizQuestion,
+              JSON.stringify(options),
+            ],
+          );
+        } else if (existing.rows[0].title.startsWith(`${course.title}:`)) {
+          await client.query(
+            `UPDATE lessons
+             SET title = $2, body = $3, quiz_question = $4, quiz_options = $5::jsonb, quiz_answer_index = 0
+             WHERE id = $1`,
+            [
+              existing.rows[0].id,
+              title,
+              `${body}\n\nPractice task: Complete a short worked example for "${concepts[index]}". Record your assumptions, show each step, and check whether the result is reasonable.`,
+              quizQuestion,
+              JSON.stringify(options),
+            ],
+          );
+        }
       }
 
-      const resources = [
-        ["assignment", "Course study assignment", "Complete a short written assignment: define three key course concepts, solve one representative problem, and explain each step.", 1],
-        ["lecture_notes", "Course notes checklist", "Use the checklist as a guide when reviewing lecturer-provided notes, readings, or lesson recordings.", 2],
-        ["other", "Legacy University course source", "Open the university website to locate the current syllabus and lecturer-provided materials for this course.", 3],
-      ] as const;
-      for (const [resourceType, title, description, position] of resources) {
-        await client.query(
-          `INSERT INTO course_resources
-            (course_id, resource_type, title, description, license_name, attribution, url, position)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-           ON CONFLICT (course_id, position) DO NOTHING`,
-          [
-            row.id,
-            resourceType,
-            title,
-            description,
-            "University course materials; permissions vary",
-            "Legacy University Okija, Department of Computer Science. Confirm permission and attribution before reuse.",
-            course.sourceUrl,
-            position,
-          ],
-        );
-      }
+      await client.query(
+        `DELETE FROM course_resources
+         WHERE course_id = $1
+           AND title IN (
+             'Course study assignment',
+             'Course notes checklist',
+             'Legacy University course source'
+           )`,
+        [row.id],
+      );
     }
 
     const courseIds = await client.query<{ id: string; slug: string }>(

@@ -995,7 +995,12 @@ async function seed() {
           course.attribution,
           JSON.stringify({
             description: profile?.summary ?? course.summary,
-            learningResourceTypes: ["LearnFlow study guide", "Knowledge check", "Practical application"],
+            format: "Twenty self-paced study topics with concise explanations, practical examples, knowledge checks, and an integrated review.",
+            topics: profile?.concepts.map((concept) => ({
+              name: concept.charAt(0).toUpperCase() + concept.slice(1),
+              url: "",
+            })) ?? [],
+            learningResourceTypes: ["Study guides", "Knowledge checks", "Practical examples", "Integrated review"],
           }),
         ],
       );
@@ -1017,21 +1022,34 @@ async function seed() {
         "review and synthesis",
       ];
 
-      const lessonStages = [
-        ["Foundations and learning outcomes", `Begin ${course.title} by defining the course's purpose, vocabulary, assumptions, and expected learning outcomes. Focus on ${concepts[0]} and explain why it matters to the field.`, `Which is the best starting point for ${course.title}?`],
-        ["Core concepts and models", `Study ${concepts[1]}. Explain how it relates to the course's assumptions, identify its inputs and outputs, and use a small example to distinguish it from nearby concepts.`, `What most clearly demonstrates understanding of ${concepts[1]}?`],
-        ["Methods and practical problem-solving", `Apply a structured method to ${concepts[2]}. State the problem, select relevant information, execute the method, check intermediate results, and verify the final result.`, `After applying a method in ${course.title}, which step validates the result?`],
-        ["Analysis and real-world application", `Analyze ${concepts[3]} in a realistic scenario. Compare at least two choices, identify constraints and trade-offs, and support your conclusion with evidence.`, `Which action is strongest when evaluating ${concepts[3]}?`],
-        ["Integrated review and project", `Synthesize ${concepts[4]}. Create a short case study or worked example that connects the course foundations, methods, evidence, and analysis.`, `What is the best way to demonstrate mastery of ${concepts[4]}?`],
-      ] as const;
+      const topicNames = concepts.flatMap((concept) => [
+        `${concept}: foundations`,
+        `${concept}: principles and models`,
+        `${concept}: worked application`,
+        `${concept}: analysis and evaluation`,
+      ]);
 
-      for (const [index, [lessonTitle, body, quizQuestion]] of lessonStages.entries()) {
+      for (const [index, topicName] of topicNames.entries()) {
+        const concept = concepts[index % concepts.length];
+        const lessonTitle = topicName;
+        const angle = [
+          "Define the key terms, scope, inputs, outputs, and assumptions. Compare one correct definition with a misleading shorthand, then connect the idea to the purpose of the course.",
+          "Explain the underlying principle or model, show how its parts interact, and identify the conditions under which the principle is valid.",
+          "Work through a small concrete example step by step. State assumptions, apply the appropriate method, show intermediate reasoning, and check whether the result is reasonable.",
+          "Evaluate the topic in a realistic situation. Compare alternatives, identify constraints and trade-offs, justify a decision, and note how the conclusion could change with different evidence.",
+        ][Math.floor(index / concepts.length)];
+        const body = [
+          `Topic: ${topicName}`,
+          `Core idea: In ${course.title}, ${concept} should be understood as a reasoned process rather than an isolated definition. ${angle}`,
+          `Study prompt: Explain "${topicName}" in your own words, give one practical example, and identify one common misconception or constraint.`,
+        ].join("\n\n");
         const title = `${course.title}: ${lessonTitle}`;
         const options = [
-          "Explain the idea and apply it correctly to a concrete example.",
-          "Repeat a definition without testing it.",
-          "Ignore constraints and assume the first answer is valid.",
+          `Explain ${topicName}, state its assumptions, and apply it to a concrete example.`,
+          `Repeat the name of ${topicName} without defining or applying it.`,
+          `Ignore evidence and constraints when evaluating ${topicName}.`,
         ];
+        const quizQuestion = `Which response demonstrates the strongest understanding of ${topicName}?`;
         const existing = await client.query<{ id: string; title: string }>(
           "SELECT id, title FROM lessons WHERE course_id = $1 AND position = $2",
           [row.id, index + 1],
@@ -1045,7 +1063,7 @@ async function seed() {
             [
               row.id,
               title,
-              `${body}\n\nPractice task: Complete a short worked example for "${concepts[index]}". Record your assumptions, show each step, and check whether the result is reasonable.`,
+              `${body}\n\nPractice task: Complete a short worked example for "${topicName}". Record your assumptions, show each step, and check whether the result is reasonable.`,
               index + 1,
               quizQuestion,
               JSON.stringify(options),
@@ -1059,7 +1077,7 @@ async function seed() {
             [
               existing.rows[0].id,
               title,
-              `${body}\n\nPractice task: Complete a short worked example for "${concepts[index]}". Record your assumptions, show each step, and check whether the result is reasonable.`,
+              `${body}\n\nPractice task: Complete a short worked example for "${topicName}". Record your assumptions, show each step, and check whether the result is reasonable.`,
               quizQuestion,
               JSON.stringify(options),
             ],

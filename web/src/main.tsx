@@ -1206,14 +1206,19 @@ interface CourseDetailProps {
 function CourseDetail(props: CourseDetailProps) {
   const { course, user, completedLessonIds, answers, quizFeedback, setAnswer, busy, onBack, onComplete, onOpenAuth } = props;
   const lessonsComplete = course.lessons.filter((lesson) => completedLessonIds.has(lesson.id)).length;
-  const renderLessonBody = (lesson: Lesson) => lesson.body
-    .split(/(https:\/\/[^\s]+)/g)
-    .map((part, index) => {
+  const renderLessonBody = (lesson: Lesson) => lesson.body.split(/\n\n+/).map((paragraph, index) => {
+    const [label, ...rest] = paragraph.match(/^(Topic|Core idea|Study prompt):\s*(.+)$/s)?.slice(1) ?? [];
+    if (label && rest.length) {
+      return <p className="lesson-text-block" key={`${lesson.id}-paragraph-${index}`}><strong>{label}:</strong> {rest[0]}</p>;
+    }
+    const parts = paragraph.split(/(https:\/\/[^\s]+)/g);
+    return <p className="lesson-text-block" key={`${lesson.id}-paragraph-${index}`}>{parts.map((part, partIndex) => {
       const punctuation = part.match(/[.,;!?]+$/)?.[0] ?? "";
       const url = punctuation ? part.slice(0, -punctuation.length) : part;
-      if (!url.startsWith("https://")) return part;
-      return <React.Fragment key={`${lesson.id}-source-${index}`}><a href={url} target="_blank" rel="noopener noreferrer">{url}</a>{punctuation}</React.Fragment>;
-    });
+      if (!url.startsWith("https://")) return <React.Fragment key={`${lesson.id}-${index}-${partIndex}`}>{part}</React.Fragment>;
+      return <React.Fragment key={`${lesson.id}-${index}-${partIndex}`}><a href={url} target="_blank" rel="noopener noreferrer">{url}</a>{punctuation}</React.Fragment>;
+    })}</p>;
+  });
   const getResourceUrl = (resource: CourseResource) => resource.storagePath
     ? supabase?.storage.from("course-materials").getPublicUrl(resource.storagePath).data.publicUrl ?? ""
     : course.provider === "Legacy University Okija" && resource.url === course.sourceUrl
@@ -1230,13 +1235,12 @@ function CourseDetail(props: CourseDetailProps) {
       <button className="back-link" onClick={onBack}>← All courses</button>
       <div className="course-detail-hero"><span className="eyebrow">{course.provider} · {course.subject}</span><h1>{course.title}</h1><p>{course.summary}</p><div className="detail-tags"><span>{course.level === "all" ? "All levels" : `${course.level} level`}</span><span>{course.lessons.length > 0 ? `${course.lessons.length} LearnFlow lesson${course.lessons.length === 1 ? "" : "s"}` : "Official course materials"}</span><span>{course.licenseName}</span></div></div>
       {(course.details.description || course.details.instructors?.length || course.details.departments?.length || course.details.topics?.length || course.details.learningResourceTypes?.length || course.details.image) && <section className="ocw-course-info">
-        <div className="ocw-course-description"><span className="eyebrow">COURSE DESCRIPTION</span><h2>About this course</h2><p>{course.details.description}</p>{course.details.textbook && <p>Textbook: <a href={course.details.textbook.url} target="_blank" rel="noopener noreferrer"><em>{course.details.textbook.title}</em></a>.</p>}{course.details.format && <div className="ocw-format"><h3>Course Format</h3><p>{course.details.format}</p></div>}<a className="ocw-original-link" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">View original course page and full syllabus ↗</a></div>
+        <div className="ocw-course-description"><span className="eyebrow">COURSE DESCRIPTION</span><h2>About this course</h2><p>{course.details.description}</p>{course.details.textbook && <p>Textbook: <a href={course.details.textbook.url} target="_blank" rel="noopener noreferrer"><em>{course.details.textbook.title}</em></a>.</p>}{course.details.format && <div className="ocw-format"><h3>Course Format</h3><p>{course.details.format}</p></div>}{course.provider !== "Legacy University Okija" && <a className="ocw-original-link" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">View original course page and full syllabus ↗</a>}</div>
         <div className="ocw-course-info-panel"><span className="eyebrow">COURSE INFO</span>
-          {course.details.instructors?.length ? <div className="ocw-info-row"><h3>Instructor</h3><ul>{course.details.instructors.map((instructor) => <li key={instructor.url}><a href={instructor.url} target="_blank" rel="noopener noreferrer">{instructor.name}</a></li>)}</ul></div> : null}
           {course.details.departments?.length ? <div className="ocw-info-row"><h3>Departments</h3><ul>{course.details.departments.map((department) => <li key={department.url}><a href={department.url} target="_blank" rel="noopener noreferrer">{department.name}</a></li>)}</ul></div> : null}
-          {course.details.topics?.length ? <div className="ocw-info-row"><h3>Topics</h3><ul>{course.details.topics.map((topic) => <li key={topic.url}><a href={topic.url} target="_blank" rel="noopener noreferrer">{topic.name}</a></li>)}</ul></div> : null}
+          {course.details.topics?.length ? <div className="ocw-info-row"><h3>Topics</h3><ul>{course.details.topics.map((topic, index) => <li key={`${topic.name}-${index}`}>{topic.url ? <a href={topic.url} target="_blank" rel="noopener noreferrer">{topic.name}</a> : topic.name}</li>)}</ul></div> : null}
           {course.details.learningResourceTypes?.length ? <div className="ocw-info-row"><h3>Learning Resource Types</h3><ul className="ocw-resource-types">{course.details.learningResourceTypes.map((type) => <li key={type}>{type}</li>)}</ul></div> : null}
-          <a className="ocw-original-link" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Official source ↗</a>
+          {course.provider !== "Legacy University Okija" && <a className="ocw-original-link" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Official source ↗</a>}
           {course.details.downloadUrl && <a className="button button-primary button-small ocw-download" href={course.details.downloadUrl} target="_blank" rel="noopener noreferrer">Download this course ↗</a>}
         </div>
         {course.details.image && <figure className="ocw-course-image"><img src={course.details.image.url} alt={course.details.image.alt} loading="lazy" /><figcaption>{course.details.image.caption}</figcaption></figure>}

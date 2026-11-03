@@ -1034,15 +1034,38 @@ async function seed() {
         const angleIndex = index % 4;
         const concept = concepts[conceptIndex];
         const lessonTitle = topicName;
-        const angle = [
-          "Define the key terms, scope, inputs, outputs, and assumptions. Compare one correct definition with a misleading shorthand, then connect the idea to the purpose of the course.",
-          "Explain the underlying principle or model, show how its parts interact, and identify the conditions under which the principle is valid.",
-          "Work through a small concrete example step by step. State assumptions, apply the appropriate method, show intermediate reasoning, and check whether the result is reasonable.",
-          "Evaluate the topic in a realistic situation. Compare alternatives, identify constraints and trade-offs, justify a decision, and note how the conclusion could change with different evidence.",
+        const angleDetails = [
+          {
+            heading: "Foundations and definitions",
+            approach: "Begin by defining the central terms and separating what the concept includes from what it does not include. A precise definition prevents the learner from treating a familiar label as a complete explanation.",
+          },
+          {
+            heading: "Principles, models, and relationships",
+            approach: "Next, examine the principles or models that connect this concept to the wider discipline. Explain the purpose of each part, how the parts interact, and the assumptions that make the model useful.",
+          },
+          {
+            heading: "Worked application",
+            approach: "Then apply the concept to a practical scenario. State the initial conditions, identify the relevant information, make each decision in sequence, and check every conclusion against the stated assumptions.",
+          },
+          {
+            heading: "Analysis, evaluation, and trade-offs",
+            approach: "Finally, evaluate the concept critically. Compare possible decisions, identify benefits and limitations, consider evidence and constraints, and explain why a different context may lead to a different conclusion.",
+          },
         ][angleIndex];
         const body = [
-          `Core idea: In ${course.title}, ${concept} should be understood as a reasoned process rather than an isolated definition. ${angle}`,
-          `Study prompt: Explain "${topicName}" in your own words, give one practical example, and identify one common misconception or constraint.`,
+          `${angleDetails.heading}`,
+          `At the start of this topic, define success clearly. In ${course.title}, ${concept} should be understood as a reasoned process rather than a memorized label. Learners should be able to identify the purpose of the concept, describe the information it uses, recognize the people or systems affected by it, and explain the expected result. These elements matter because ${course.title} is not only concerned with isolated facts; it is concerned with making defensible decisions in realistic situations.`,
+          `${angleDetails.approach}`,
+          `In the context of ${course.title}, begin with a simple scenario. Suppose a student, team, organization, or technical system must resolve a problem related to ${concept}. First, clarify the goal and record the constraints. Constraints may include limited time, incomplete information, cost, security requirements, performance expectations, available skills, legal or ethical responsibilities, or competing stakeholder priorities. Without this step, a reasonable-looking answer may address the wrong problem.`,
+          `The next step is to organize the relevant evidence. Separate confirmed facts from assumptions. Do not allow a familiar example, a preferred tool, or a previous decision to replace the evidence that is actually available in the current case. For ${concept}, ask three questions: what information is required, where that information comes from, and what would invalidate an initial conclusion? This approach makes the reasoning visible and easier for another learner or practitioner to review.`,
+          `A practical framework for studying this topic is to use the sequence Observe, Analyze, Decide, and Validate. Observe the situation and identify what is happening. Analyze the important relationships, patterns, risks, and alternatives. Decide which course of action is justified by the evidence and clearly state why. Validate the result by checking it against the assumptions, measuring likely outcomes, and considering unintended consequences. This sequence may be applied to planning, implementation, testing, governance, or review depending on the course topic.`,
+          `A common misconception is to treat the first definition, model, or example as complete. Definitions are useful starting points, but they do not automatically show how the concept works under pressure, ambiguity, or change. Likewise, one successful worked example does not prove that a method will work in every situation. A strong learner explains the boundary conditions: when the method is appropriate, which assumptions it requires, what evidence is necessary, and which alternative approach might be better.`,
+          `A further misconception is to separate knowledge from action. In ${course.title}, ${concept} becomes meaningful when it changes how a decision is made or how a problem is communicated. For example, a learner should be able to explain the technical or organizational consequence, recommend an appropriate next step, justify that recommendation, and identify the information needed to confirm it. The quality of an explanation depends not only on using correct vocabulary, but also on showing relationships among terms, evidence, and outcomes.`,
+          `When evaluating a real application of ${concept}, consider feasibility, accuracy, fairness, cost, risk, and maintainability. A technically possible solution is not necessarily desirable if it creates an unacceptable operational burden. A quick solution may fail if it does not remain reliable as conditions change. A thorough solution may be inappropriate if it uses more resources than the situation allows. Professional judgment means balancing these concerns rather than maximizing one factor while ignoring the others.`,
+          `Practice and review should reinforce the reasoning process. Before checking the answer, write down the goal, identify the relevant factors, and predict a reasonable range of results. Then work through the example step by step. Compare the final result with the goal and explain any difference. If the result appears correct, ask whether each assumption is realistic and whether a missing constraint could change the decision. This is how a topic becomes an applied skill rather than a paragraph to memorize.`,
+          `By the end of this topic, a learner should be able to give a clear definition of ${concept}, explain why the concept matters in ${course.title}, apply it to a worked example, recognize a misleading shortcut, compare alternatives, and defend a decision using evidence. The ability to produce this explanation under new conditions is a stronger measure of understanding than merely repeating the topic name.`,
+          `Key takeaway: Use ${concept} deliberately. Define the problem, use a suitable principle or model, check assumptions, work through the relevant evidence, evaluate alternatives, and communicate the conclusion with enough detail for someone else to verify it.`,
+          `Study task: Explain "${topicName}" in your own words, use one original practical example, and identify one misconception, limitation, or constraint. Then write a short justification for the decision you would recommend and list the evidence needed to confirm that decision.`,
         ].join("\n\n");
         const title = `${course.title}: ${lessonTitle}`;
         const options = [

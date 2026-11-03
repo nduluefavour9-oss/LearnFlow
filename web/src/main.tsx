@@ -1206,6 +1206,25 @@ interface CourseDetailProps {
 function CourseDetail(props: CourseDetailProps) {
   const { course, user, completedLessonIds, answers, quizFeedback, setAnswer, busy, onBack, onComplete, onOpenAuth } = props;
   const lessonsComplete = course.lessons.filter((lesson) => completedLessonIds.has(lesson.id)).length;
+  const [lessonIndex, setLessonIndex] = useState(0);
+  const lessons = useMemo(
+    () => [...course.lessons].sort((a, b) => a.position - b.position),
+    [course.lessons],
+  );
+  const lesson = lessons[lessonIndex] ?? null;
+
+  useEffect(() => {
+    setLessonIndex(0);
+  }, [course.id]);
+
+  const goToLesson = (nextIndex: number) => {
+    const safeIndex = Math.max(0, Math.min(nextIndex, lessons.length - 1));
+    setLessonIndex(safeIndex);
+    window.setTimeout(() => {
+      document.getElementById("course-topic-reader")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  };
+
   const lessonDisplayTitle = (lesson: Lesson) => lesson.title.startsWith(`${course.title}: `)
     ? lesson.title.slice(course.title.length + 2)
     : lesson.title;
@@ -1267,14 +1286,22 @@ function CourseDetail(props: CourseDetailProps) {
           </section>
           <div className="study-guide-notice"><div><strong>Original LearnFlow study guides</strong><p>{course.provider === "Legacy University Okija" ? "These concise topic summaries, practical prompts, and knowledge checks provide a structured introduction to the course. Your administrator can add official lecture notes, readings, and assignments when they are available." : "These concise topic summaries and questions are original study aids, not the full university course. For detailed explanations, lectures, readings, downloadable notes, and complete assignments, use the provider's official materials and follow their terms."}</p></div>{course.provider !== "Legacy University Okija" && <a href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Study the full official course ↗</a>}</div>
           <div className="lesson-column-heading"><div><span className="eyebrow">COURSE CONTENT</span><h2>Your learning path</h2></div>{course.lessons.length > 0 && <span className="progress-count">{lessonsComplete} / {course.lessons.length} complete</span>}</div>
-          {course.lessons.length ? course.lessons.map((lesson) => {
+          {lesson ? (() => {
             const complete = completedLessonIds.has(lesson.id);
             const feedback = quizFeedback[lesson.id];
             return (
-              <article className="lesson-card" key={lesson.id}>
-                <div className="lesson-number">{String(lesson.position).padStart(2, "0")}</div>
-                <div className="lesson-content">
-                  <h3>{lessonDisplayTitle(lesson)}</h3>
+              <article className="lesson-reader" id="course-topic-reader">
+                <div className="lesson-reader-header">
+                  <div>
+                    <span className="eyebrow">TOPIC {String(lesson.position).padStart(2, "0")} OF {String(lessons.length).padStart(2, "0")}</span>
+                    <h3>{lessonDisplayTitle(lesson)}</h3>
+                  </div>
+                  <span className={complete ? "lesson-status is-complete" : "lesson-status"}>{complete ? "✓" : "○"}</span>
+                </div>
+                <div className="lesson-reader-progress" aria-label={`${lessonIndex + 1} of ${lessons.length} topics`}>
+                  <span style={{ width: `${((lessonIndex + 1) / lessons.length) * 100}%` }} />
+                </div>
+                <div className="lesson-content lesson-reader-content">
                   <div className="lesson-text">{renderLessonBody(lesson)}</div>
                   {lesson.quizQuestion ? (
                     <fieldset className="lesson-quiz">
@@ -1311,7 +1338,7 @@ function CourseDetail(props: CourseDetailProps) {
                           disabled={busy || complete}
                           onClick={() => onComplete(course.id, lesson)}
                         >
-                          {complete ? "Lesson complete ✓" : busy ? "Checking…" : feedback?.correct ? "Answer correct" : "Check answer"}
+                          {complete ? "Topic complete ✓" : busy ? "Checking…" : feedback?.correct ? "Answer correct" : "Check answer"}
                         </button>
                       ) : (
                         <button className="button button-secondary button-small" onClick={onOpenAuth}>
@@ -1321,16 +1348,31 @@ function CourseDetail(props: CourseDetailProps) {
                     </fieldset>
                   ) : user ? (
                     <button className="button button-secondary button-small" disabled={busy || complete} onClick={() => onComplete(course.id, lesson)}>
-                      {complete ? "Lesson complete ✓" : "Mark lesson complete"}
+                      {complete ? "Topic complete ✓" : "Mark topic complete"}
                     </button>
                   ) : (
                     <button className="button button-secondary button-small" onClick={onOpenAuth}>Sign in to save progress</button>
                   )}
                 </div>
-                <span className={complete ? "lesson-status is-complete" : "lesson-status"}>{complete ? "✓" : "○"}</span>
+                <nav className="lesson-reader-navigation" aria-label="Topic navigation">
+                  <button
+                    className="button button-secondary button-small"
+                    disabled={lessonIndex === 0}
+                    onClick={() => goToLesson(lessonIndex - 1)}
+                  >
+                    ← Previous
+                  </button>
+                  <button
+                    className="button button-primary button-small"
+                    disabled={lessonIndex >= lessons.length - 1}
+                    onClick={() => goToLesson(lessonIndex + 1)}
+                  >
+                    Next topic →
+                  </button>
+                </nav>
               </article>
             );
-          }) : <div className="empty-state"><h3>No lessons have been added yet.</h3><p>{course.provider === "Legacy University Okija" ? "The university administrator can add course-specific lessons and quizzes." : "This catalog entry links to the provider's official course materials. We link out rather than copy materials whose licenses may restrict reuse."}</p>{course.provider !== "Legacy University Okija" && <a className="button button-secondary" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Open official course ↗</a>}</div>}
+          })() : <div className="empty-state"><h3>No lessons have been added yet.</h3><p>{course.provider === "Legacy University Okija" ? "The university administrator can add course-specific lessons and quizzes." : "This catalog entry links to the provider's official course materials. We link out rather than copy materials whose licenses may restrict reuse."}</p>{course.provider !== "Legacy University Okija" && <a className="button button-secondary" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Open official course ↗</a>}</div>}
         </div>
         <aside className="course-source-card"><span className="eyebrow">{course.provider === "Legacy University Okija" ? "COURSE INFORMATION" : "COURSE SOURCE"}</span><h3>{course.provider === "Legacy University Okija" ? "LearnFlow study course" : "Continue with the provider"}</h3><p>{course.provider === "Legacy University Okija" ? "Use the structured lessons and knowledge checks in this portal. Official university materials should be added by an administrator when available." : "Open the official course for its full syllabus, activities, and course-specific resources."}</p>{course.provider !== "Legacy University Okija" && <a className="button button-primary button-wide" href={course.sourceUrl} target="_blank" rel="noopener noreferrer">Visit official course ↗</a>}<div className="source-detail"><span>PROVIDER</span><strong>{course.provider}</strong></div><div className="source-detail"><span>LICENSE</span><strong>{course.licenseName}</strong>{course.provider !== "Legacy University Okija" && <a href={course.licenseUrl} target="_blank" rel="noopener noreferrer">Review reuse terms ↗</a>}</div><div className="source-attribution"><span>ATTRIBUTION</span><p>{course.attribution}</p></div></aside>
       </div>

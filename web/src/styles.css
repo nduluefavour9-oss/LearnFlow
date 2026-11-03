@@ -406,6 +406,8 @@ a { color: inherit; }
 .submission-modal { width: min(760px, 100%); max-height: calc(100vh - 36px); overflow-y: auto; }
 .submission-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid rgba(164, 181, 208, .12); }
 .submission-section h3, .submission-history h3 { margin: 0 0 12px; font-size: 15px; }
+.submission-section h3 { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.submission-word-count { color: #91a2b5; font-size: 11px; font-weight: 500; }
 .submission-history { margin-top: 18px; }
 .submission-history > div { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; padding: 10px 0; border-top: 1px solid rgba(164, 181, 208, .1); }
 .submission-history small { grid-column: 1 / -1; }

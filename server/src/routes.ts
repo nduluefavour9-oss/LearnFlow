@@ -151,9 +151,25 @@ router.post("/submissions", requireAuth, asyncRoute(async (req, res) => {
     res.status(400).json({ error: "Course material positions must be unique within a submission." });
     return;
   }
-  const slug = await pool.query("SELECT 1 FROM courses WHERE slug = $1 LIMIT 1", [input.course.slug]);
-  if (slug.rowCount) {
-    res.status(409).json({ error: "A course with this slug already exists." });
+  const existingCourse = await pool.query(
+    `SELECT 1 FROM courses
+     WHERE slug = $1 OR lower(title) = lower($2)
+     LIMIT 1`,
+    [input.course.slug, input.course.title],
+  );
+  if (existingCourse.rowCount) {
+    res.status(409).json({ error: "This course is already available in the catalog." });
+    return;
+  }
+  const pendingSubmission = await pool.query(
+    `SELECT 1 FROM course_submissions
+     WHERE status = 'pending'
+       AND (payload->'course'->>'slug' = $1 OR lower(payload->'course'->>'title') = lower($2))
+     LIMIT 1`,
+    [input.course.slug, input.course.title],
+  );
+  if (pendingSubmission.rowCount) {
+    res.status(409).json({ error: "A pending submission already exists for this course." });
     return;
   }
   const user = res.locals.user as AuthenticatedUser;
@@ -203,6 +219,15 @@ router.post("/admin/submissions/:submissionId/approve", requireAdmin, asyncRoute
       return;
     }
     const input = courseSubmissionSchema.parse(found.rows[0].payload);
+    const existing = await client.query(
+      `SELECT 1 FROM courses WHERE slug = $1 OR lower(title) = lower($2) LIMIT 1`,
+      [input.course.slug, input.course.title],
+    );
+    if (existing.rowCount) {
+      await client.query("ROLLBACK");
+      res.status(409).json({ error: "This course is already in the catalog." });
+      return;
+    }
     const inserted = await client.query(
       `INSERT INTO courses
         (slug, title, summary, subject, level, provider, source_url, license_name, license_url, attribution, is_published)

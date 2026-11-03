@@ -74,6 +74,23 @@ export const courseSubmissionSchema = z.object({
     contentType: z.null(),
     position: z.number().int().min(1).max(5000),
   })).max(50),
+}).superRefine((submission, context) => {
+  for (const [index, lesson] of submission.lessons.entries()) {
+    if (lesson.body.trim().split(/\s+/).length < 500) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["lessons", index, "body"],
+        message: "Each submitted lesson must contain at least 500 words.",
+      });
+    }
+  }
+  if (submission.lessons.length === 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["lessons"],
+      message: "Submit at least one full lesson.",
+    });
+  }
 });
 
 export const reviewSubmissionSchema = z.object({

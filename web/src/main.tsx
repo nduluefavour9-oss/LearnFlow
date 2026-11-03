@@ -1027,7 +1027,7 @@ function App() {
             <form className="form-stack submission-form" onSubmit={submitCourse}>
               <div className="form-grid">
                 <label>Course title<input required minLength={3} maxLength={160} value={submissionForm.title} onChange={(e) => setSubmissionForm({ ...submissionForm, title: e.target.value, slug: e.target.value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') })} /></label>
-                <label>Course slug<input required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={submissionForm.slug} onChange={(e) => setSubmissionForm({ ...submissionForm, slug: e.target.value })} /></label>
+                <label>Course URL name<input required readOnly pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={submissionForm.slug} /><small>Created automatically from the course title</small></label>
                 <label>Subject<input required maxLength={80} value={submissionForm.subject} onChange={(e) => setSubmissionForm({ ...submissionForm, subject: e.target.value })} /></label>
                 <label>Level<select value={submissionForm.level} onChange={(e) => setSubmissionForm({ ...submissionForm, level: e.target.value as Level })}><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option><option value="all">All levels</option></select></label>
                 <label>Provider<input required maxLength={120} value={submissionForm.provider} onChange={(e) => setSubmissionForm({ ...submissionForm, provider: e.target.value })} /></label>
